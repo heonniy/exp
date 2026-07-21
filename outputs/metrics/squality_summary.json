@@ -1,0 +1,27 @@
+{
+  "dataset": "squality",
+  "num_prefix_groups": 52,
+  "num_requests": 208,
+  "prompt_tokens": {
+    "mean": 7361.990384615385,
+    "p50": 7246.5,
+    "p90": 8231.3
+  },
+  "generated_tokens": {
+    "mean": 129.15384615384616,
+    "p50": 128.0,
+    "p90": 176.60000000000002,
+    "fraction_ge_64": 0.9711538461538461,
+    "fraction_ge_128": 0.5048076923076923,
+    "fraction_hit_cap": 0.08173076923076923
+  },
+  "exp1": {
+    "within_prefix_cosine_first_64_mean": 0.7962938277115816,
+    "within_prefix_cosine_first_128_mean": 0.8464858445121783
+  },
+  "exp2": {
+    "cross_better_rate_first_64": 0.8613861386138614,
+    "cross_better_rate_first_128": 0.8260869565217391,
+    "mean_cross_minus_same_margin_first128": 0.06681020380282651
+  }
+}

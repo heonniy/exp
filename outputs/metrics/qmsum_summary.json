@@ -1,0 +1,27 @@
+{
+  "dataset": "qmsum",
+  "num_prefix_groups": 33,
+  "num_requests": 132,
+  "prompt_tokens": {
+    "mean": 17792.840909090908,
+    "p50": 16455.0,
+    "p90": 26294.8
+  },
+  "generated_tokens": {
+    "mean": 141.0909090909091,
+    "p50": 143.5,
+    "p90": 192.0,
+    "fraction_ge_64": 0.9621212121212122,
+    "fraction_ge_128": 0.6287878787878788,
+    "fraction_hit_cap": 0.25
+  },
+  "exp1": {
+    "within_prefix_cosine_first_64_mean": 0.8387532273222473,
+    "within_prefix_cosine_first_128_mean": 0.8810704521172457
+  },
+  "exp2": {
+    "cross_better_rate_first_64": 0.5826771653543307,
+    "cross_better_rate_first_128": 0.569620253164557,
+    "mean_cross_minus_same_margin_first128": 0.0183237728281646
+  }
+}

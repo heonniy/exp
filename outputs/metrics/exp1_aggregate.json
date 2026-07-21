@@ -1,0 +1,80 @@
+{
+  "qmsum|first_128": {
+    "dataset": "qmsum",
+    "analysis_window": "first_128",
+    "pair_count": 78,
+    "cosine_mean": 0.8810704521172457,
+    "cosine_median": 0.8859729267412594,
+    "cosine_std": 0.06480429402885735,
+    "cosine_p10": 0.7921420167441049,
+    "cosine_p25": 0.8400658309282228,
+    "cosine_p75": 0.9420431272891754,
+    "cosine_p90": 0.9519912215076031,
+    "jaccard_top8_mean": 0.48883522104675947
+  },
+  "qmsum|first_64": {
+    "dataset": "qmsum",
+    "analysis_window": "first_64",
+    "pair_count": 183,
+    "cosine_mean": 0.8387532273222473,
+    "cosine_median": 0.8481885858304613,
+    "cosine_std": 0.06992510356974183,
+    "cosine_p10": 0.7437925251828734,
+    "cosine_p25": 0.7931577978456814,
+    "cosine_p75": 0.8867854380531085,
+    "cosine_p90": 0.925768422983639,
+    "jaccard_top8_mean": 0.42001676981185176
+  },
+  "qmsum|full_decode": {
+    "dataset": "qmsum",
+    "analysis_window": "full_decode",
+    "pair_count": 198,
+    "cosine_mean": 0.8772683682120275,
+    "cosine_median": 0.8859358760716435,
+    "cosine_std": 0.06305755705422252,
+    "cosine_p10": 0.7969753831143849,
+    "cosine_p25": 0.8374449870611107,
+    "cosine_p75": 0.9233342479655785,
+    "cosine_p90": 0.9531415239863944,
+    "jaccard_top8_mean": 0.4800821769887426
+  },
+  "squality|first_128": {
+    "dataset": "squality",
+    "analysis_window": "first_128",
+    "pair_count": 88,
+    "cosine_mean": 0.8464858445121783,
+    "cosine_median": 0.8683903496100835,
+    "cosine_std": 0.08615941651685415,
+    "cosine_p10": 0.701458992515354,
+    "cosine_p25": 0.8083155973145557,
+    "cosine_p75": 0.9058768358061701,
+    "cosine_p90": 0.9381538546073076,
+    "jaccard_top8_mean": 0.4598708688197325
+  },
+  "squality|first_64": {
+    "dataset": "squality",
+    "analysis_window": "first_64",
+    "pair_count": 294,
+    "cosine_mean": 0.7962938277115816,
+    "cosine_median": 0.803428119696375,
+    "cosine_std": 0.089395533761702,
+    "cosine_p10": 0.6818523249788242,
+    "cosine_p25": 0.7393859231968535,
+    "cosine_p75": 0.8601319231854119,
+    "cosine_p90": 0.9117727769911553,
+    "jaccard_top8_mean": 0.39530210121196513
+  },
+  "squality|full_decode": {
+    "dataset": "squality",
+    "analysis_window": "full_decode",
+    "pair_count": 312,
+    "cosine_mean": 0.8247685804915549,
+    "cosine_median": 0.837791012249103,
+    "cosine_std": 0.09210848908925459,
+    "cosine_p10": 0.7045278435566944,
+    "cosine_p25": 0.7685673378708648,
+    "cosine_p75": 0.8961942946983364,
+    "cosine_p90": 0.9326009681694848,
+    "jaccard_top8_mean": 0.4303889056693544
+  }
+}
