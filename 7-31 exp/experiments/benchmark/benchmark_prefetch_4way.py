@@ -318,6 +318,14 @@ def main() -> None:
         row["instrumented_operation_active_copy_ms"]
         for row in profiles["double_buffer_overlap"]
     )
+    sequential_profile_compute = statistics.median(
+        row["instrumented_operation_active_compute_ms"]
+        for row in profiles["sequential_copy_compute"]
+    )
+    sequential_profile_copy = statistics.median(
+        row["instrumented_operation_active_copy_ms"]
+        for row in profiles["sequential_copy_compute"]
+    )
     result = {
         "benchmark": "packed_expert_prefetch_4way",
         "gpu_physical_index": 0,
@@ -339,13 +347,23 @@ def main() -> None:
             (sequential - overlap) / sequential if sequential else None
         ),
         "overlap_compute_active_slowdown_ratio": (
-            overlap_profile_compute / isolated_profile_compute
+            overlap_profile_compute / sequential_profile_compute
         ),
         "overlap_copy_active_slowdown_ratio": (
+            overlap_profile_copy / sequential_profile_copy
+        ),
+        "overlap_compute_active_ratio_vs_compute_only": (
+            overlap_profile_compute / isolated_profile_compute
+        ),
+        "overlap_copy_active_ratio_vs_copy_only": (
             overlap_profile_copy / isolated_profile_copy
         ),
         "active_slowdown_measurement": (
-            "separate instrumented trials; excluded from uninstrumented makespan medians"
+            "double-buffer active duration divided by sequential copy+compute "
+            "active duration, measured in separate instrumented trials and "
+            "excluded from uninstrumented makespan medians; isolated-mode "
+            "ratios are reported separately because compute-only does not "
+            "share the post-H2D cache state"
         ),
         "logits_or_output_digests_match": (
             len(
