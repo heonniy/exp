@@ -28,6 +28,30 @@ from experiments.runtime.residency_manager import StreamingRuntimeManager
 from experiments.trace.trace_schema import RoutingTrace
 
 
+def assert_closed_monotonic_boundary(
+    probes: dict[int, dict], validated: int
+) -> None:
+    required = {validated, validated + 1}
+    if validated > 1:
+        required.add(validated - 1)
+    missing = sorted(required - set(probes))
+    if missing:
+        raise AssertionError(f"Bmax boundary probes are missing: {missing}")
+    if not probes[validated]["feasible"]:
+        raise AssertionError("validated Bmax is not feasible")
+    if probes[validated + 1]["feasible"]:
+        raise AssertionError("Bmax+1 is feasible; boundary is not closed")
+    if validated > 1 and not probes[validated - 1]["feasible"]:
+        raise AssertionError("Bmax-1 is not feasible; boundary is non-monotonic")
+    ordered = sorted(probes)
+    for smaller, larger in zip(ordered, ordered[1:]):
+        if not probes[smaller]["feasible"] and probes[larger]["feasible"]:
+            raise AssertionError(
+                f"non-monotonic feasibility: B={smaller} failed but "
+                f"B={larger} succeeded"
+            )
+
+
 def _probe_256(
     *,
     model,
@@ -228,23 +252,35 @@ def main() -> None:
 
         def probe(batch_size: int) -> dict:
             if batch_size not in probes:
-                probes[batch_size] = _probe_256(
-                    model=model,
-                    host_store=host_store,
-                    calibration=calibration,
-                    trace=trace,
-                    forced_tokens=forced_tokens,
-                    policy=policy,
-                    k=k,
-                    batch_size=batch_size,
-                    decode_steps=args.decode_steps,
-                    input_tokens=config.dataset.input_tokens,
-                    peak_sequence_length=config.peak_sequence_length,
-                    safety_margin_bytes=int(source["safety_margin_bytes"]),
-                    num_layers=config.model.num_moe_layers,
-                    num_experts=config.model.num_experts_per_layer,
-                    permanent_method=args.permanent_method,
+                attempts = []
+                for _ in range(2):
+                    value = _probe_256(
+                        model=model,
+                        host_store=host_store,
+                        calibration=calibration,
+                        trace=trace,
+                        forced_tokens=forced_tokens,
+                        policy=policy,
+                        k=k,
+                        batch_size=batch_size,
+                        decode_steps=args.decode_steps,
+                        input_tokens=config.dataset.input_tokens,
+                        peak_sequence_length=config.peak_sequence_length,
+                        safety_margin_bytes=int(source["safety_margin_bytes"]),
+                        num_layers=config.model.num_moe_layers,
+                        num_experts=config.model.num_experts_per_layer,
+                        permanent_method=args.permanent_method,
+                    )
+                    attempts.append(value)
+                    if value["feasible"]:
+                        break
+                selected = dict(attempts[-1])
+                selected["attempt_count"] = len(attempts)
+                selected["transient_oom_recovered"] = bool(
+                    len(attempts) > 1 and selected["feasible"]
                 )
+                selected["attempts"] = attempts
+                probes[batch_size] = selected
             return probes[batch_size]
 
         for batch_size in sorted({max(1, candidate - 1), candidate, candidate + 1}):
@@ -262,8 +298,7 @@ def main() -> None:
         probe(max(1, validated - 1))
         probe(validated)
         probe(validated + 1)
-        if not probe(validated)["feasible"] or probe(validated + 1)["feasible"]:
-            raise AssertionError("256-step Bmax boundary is not closed")
+        assert_closed_monotonic_boundary(probes, validated)
 
         result = {
             **{

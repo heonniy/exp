@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import time
 from pathlib import Path
@@ -35,10 +36,13 @@ def _clear_cuda_probe_state() -> None:
     # A new executor owns a new compute stream. cuBLAS caches a workspace per
     # stream, and those workspaces otherwise accumulate across a shared-process
     # Bmax sweep and make later policies look artificially memory-constrained.
+    torch.cuda.synchronize()
+    gc.collect()
     clear_workspaces = getattr(torch._C, "_cuda_clearCublasWorkspaces", None)
     if clear_workspaces is not None:
         clear_workspaces()
     torch.cuda.empty_cache()
+    gc.collect()
 
 
 def _make_peak_cache(model, batch_size: int, peak_sequence_length: int):
