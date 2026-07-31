@@ -27,6 +27,25 @@ class HostWeightProvider(Protocol):
         """Return pinned CPU gate/up/down tensors."""
 
 
+def interval_overlap_ms(
+    first: list[tuple[float, float]],
+    second: list[tuple[float, float]],
+) -> float:
+    left = sorted(first)
+    right = sorted(second)
+    i = j = 0
+    overlap = 0.0
+    while i < len(left) and j < len(right):
+        start = max(left[i][0], right[j][0])
+        stop = min(left[i][1], right[j][1])
+        overlap += max(0.0, stop - start)
+        if left[i][1] <= right[j][1]:
+            i += 1
+        else:
+            j += 1
+    return overlap
+
+
 class SerialExpertExecutor:
     """Individual per-Expert MLP with current-layer one-ahead H2D."""
 
@@ -51,12 +70,19 @@ class SerialExpertExecutor:
         self.track_timeline = track_timeline
         self.compute_stream = torch.cuda.Stream(device=0)
         self.copy_stream = torch.cuda.Stream(device=0)
+        self.timeline_origin = None
+        if self.track_timeline:
+            self.timeline_origin = torch.cuda.Event(enable_timing=True)
+            self.timeline_origin.record(torch.cuda.current_stream())
+            self.compute_stream.wait_event(self.timeline_origin)
+            self.copy_stream.wait_event(self.timeline_origin)
         self.fetches = 0
         self.h2d_bytes = 0
         self.expert_executions = 0
         self.host_prepare_seconds = 0.0
         self.total_h2d_ms = 0.0
-        self.exposed_h2d_stall_ms = 0.0
+        self.overlapped_h2d_ms = 0.0
+        self.compute_stream_h2d_wait_ms = 0.0
         self.first_miss_stall_ms = 0.0
         self.layers_with_misses = 0
         self.expert_compute_ms = 0.0
@@ -212,8 +238,25 @@ class SerialExpertExecutor:
         if self.track_timeline:
             copy_ms = sum(start.elapsed_time(stop) for start, stop in copy_timings)
             waits = [start.elapsed_time(stop) for start, stop in wait_timings]
+            copy_intervals = [
+                (
+                    self.timeline_origin.elapsed_time(start),
+                    self.timeline_origin.elapsed_time(stop),
+                )
+                for start, stop in copy_timings
+            ]
+            compute_intervals = [
+                (
+                    self.timeline_origin.elapsed_time(start),
+                    self.timeline_origin.elapsed_time(stop),
+                )
+                for start, stop in compute_timings
+            ]
             self.total_h2d_ms += copy_ms
-            self.exposed_h2d_stall_ms += sum(waits)
+            self.overlapped_h2d_ms += interval_overlap_ms(
+                copy_intervals, compute_intervals
+            )
+            self.compute_stream_h2d_wait_ms += sum(waits)
             self.expert_compute_ms += sum(
                 start.elapsed_time(stop) for start, stop in compute_timings
             )
@@ -237,23 +280,20 @@ class SerialExpertExecutor:
                 self.total_h2d_ms if self.track_timeline else None
             ),
             "exposed_h2d_stall_ms": (
-                self.exposed_h2d_stall_ms if self.track_timeline else None
-            ),
-            "overlapped_h2d_ms": (
-                max(0.0, self.total_h2d_ms - self.exposed_h2d_stall_ms)
+                max(0.0, self.total_h2d_ms - self.overlapped_h2d_ms)
                 if self.track_timeline
                 else None
             ),
+            "overlapped_h2d_ms": (
+                self.overlapped_h2d_ms if self.track_timeline else None
+            ),
             "overlap_ratio": (
-                max(
-                    0.0,
-                    min(
-                        1.0,
-                        1.0 - self.exposed_h2d_stall_ms / self.total_h2d_ms,
-                    ),
-                )
+                max(0.0, min(1.0, self.overlapped_h2d_ms / self.total_h2d_ms))
                 if self.track_timeline and self.total_h2d_ms
                 else None
+            ),
+            "compute_stream_h2d_wait_ms": (
+                self.compute_stream_h2d_wait_ms if self.track_timeline else None
             ),
             "first_miss_stall_ms": (
                 self.first_miss_stall_ms if self.track_timeline else None

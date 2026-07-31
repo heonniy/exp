@@ -2,6 +2,7 @@ import torch
 
 from experiments.runtime.host_expert_store import PinnedExpertStore
 from experiments.runtime.offloaded_model import OffloadedQwenExperts, build_routed_tokens
+from experiments.runtime.serial_expert_executor import interval_overlap_ms
 
 
 class FakeEngine:
@@ -37,3 +38,9 @@ def test_routed_token_axis_order() -> None:
     assert torch.equal(routed[2].routing_weights, torch.tensor([0.2, 0.4]))
     assert routed[5].token_indices.tolist() == [0, 1]
     assert torch.equal(routed[5].routing_weights, torch.tensor([0.8, 0.7]))
+
+
+def test_timeline_overlap_uses_interval_intersection() -> None:
+    copies = [(0.0, 4.0), (6.0, 10.0)]
+    computes = [(2.0, 7.0), (8.0, 9.0)]
+    assert interval_overlap_ms(copies, computes) == 4.0

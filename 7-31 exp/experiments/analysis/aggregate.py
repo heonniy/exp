@@ -31,6 +31,7 @@ FIELDS = [
     "exposed_h2d_stall_ms",
     "overlapped_h2d_ms",
     "overlap_ratio",
+    "compute_stream_h2d_wait_ms",
     "first_miss_stall_ms",
     "copy_engine_utilization",
     "attention_ms",

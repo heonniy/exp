@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import multiprocessing
 import os
 import tempfile
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from experiments.common.config import load_config
@@ -18,6 +20,24 @@ from experiments.runtime.policies import (
 from experiments.trace.select_permanent import select_topk
 from experiments.trace.simulator import SimulationResult, simulate
 from experiments.trace.trace_schema import RoutingTrace
+
+
+_WORKER_EVALUATION: RoutingTrace | None = None
+_WORKER_EXPERT_BYTES = 0
+_WORKER_BATCH_SIZE = 0
+_WORKER_RETAIN_STATE = True
+
+
+def _simulate_worker(policy) -> SimulationResult:
+    if _WORKER_EVALUATION is None:
+        raise RuntimeError("trace-sweep worker was not initialized")
+    return simulate(
+        _WORKER_EVALUATION,
+        policy,
+        _WORKER_EXPERT_BYTES,
+        _WORKER_BATCH_SIZE,
+        _WORKER_RETAIN_STATE,
+    )
 
 
 def _atomic_csv(path: Path, fieldnames: list[str], rows: list[dict]) -> None:
@@ -55,12 +75,13 @@ def run_sweep(
     batch_size: int,
     permanent_method: str,
     retain_state_across_waves: bool,
+    workers: int = 1,
 ) -> list[SimulationResult]:
     if evaluation.num_layers != calibration.num_layers:
         raise ValueError("calibration/evaluation trace layer counts do not match")
     num_layers = evaluation.num_layers
     num_experts = int(evaluation.metadata.get("num_experts", 128))
-    results: list[SimulationResult] = []
+    policies_to_run = []
     for k in k_values:
         if k == 0:
             policies = [Stream2Policy(num_layers, num_experts)]
@@ -92,19 +113,40 @@ def run_sweep(
             if "quota_lru_k" in policy_names:
                 policies.append(QuotaLRUPolicy(num_layers, num_experts, k))
         for policy in policies:
-            result = simulate(
+            policies_to_run.append(policy)
+    if workers <= 1:
+        results = [
+            simulate(
                 evaluation,
                 policy,
                 expert_bytes,
                 batch_size,
                 retain_state_across_waves,
             )
-            results.append(result)
-            print(
-                f"{result.policy} k={k}: hit={result.hit_rate:.4f}, "
-                f"fetches={result.fetches:,}",
-                flush=True,
-            )
+            for policy in policies_to_run
+        ]
+    else:
+        global _WORKER_EVALUATION
+        global _WORKER_EXPERT_BYTES
+        global _WORKER_BATCH_SIZE
+        global _WORKER_RETAIN_STATE
+        _WORKER_EVALUATION = evaluation
+        _WORKER_EXPERT_BYTES = expert_bytes
+        _WORKER_BATCH_SIZE = batch_size
+        _WORKER_RETAIN_STATE = retain_state_across_waves
+        context = multiprocessing.get_context("fork")
+        with ProcessPoolExecutor(
+            max_workers=min(workers, len(policies_to_run)),
+            mp_context=context,
+        ) as executor:
+            results = list(executor.map(_simulate_worker, policies_to_run))
+        _WORKER_EVALUATION = None
+    for result in results:
+        print(
+            f"{result.policy} k={result.k}: hit={result.hit_rate:.4f}, "
+            f"fetches={result.fetches:,}",
+            flush=True,
+        )
     return results
 
 
@@ -131,6 +173,12 @@ def main() -> None:
     parser.add_argument(
         "--output-dir", type=Path, default=Path("experiments/results/trace_sweep")
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=min(20, os.cpu_count() or 1),
+        help="Policy-level fork workers; trace arrays are shared copy-on-write.",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -145,6 +193,7 @@ def main() -> None:
         batch_size=args.batch_size,
         permanent_method=args.permanent_method,
         retain_state_across_waves=not args.cold_each_wave,
+        workers=args.workers,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summaries = [_summary_row(result) for result in results]

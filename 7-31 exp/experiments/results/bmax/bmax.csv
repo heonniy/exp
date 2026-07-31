@@ -1,0 +1,3 @@
+policy,k,theoretical_bmax,measured_bmax,total_hbm_bytes,dense_resident_bytes,fixed_workspace_bytes,safety_margin_bytes,persistent_expert_bytes,transient_expert_bytes,kv_budget_bytes,kv_bytes_per_request,source
+stream2,0,186,157,85028372480,3082186752,0,2147483648,0,18874368,79779827712,427819008,experiments/results/bmax/stream2_k0.json
+full_resident,128,50,41,85028372480,3082186752,0,2147483648,57982058496,18874368,21797769216,427819008,experiments/results/bmax/full_resident_k128.json

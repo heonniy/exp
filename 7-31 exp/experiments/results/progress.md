@@ -6,6 +6,7 @@ All GPU measurements in this directory used physical GPU 0 through
 ## Verified foundations
 
 - GPU: NVIDIA H100 80GB HBM3, 85,028,372,480 HBM bytes.
+- CUDA async engine count: 3; PCIe link: generation 5, width 16.
 - Qwen3-30B-A3B dense/non-Expert weights: 3,082,186,752 bytes.
 - One Expert: 9,437,184 bytes; all 6,144 Experts have the same size.
 - Logical BF16 KV: 98,304 bytes/token, or 427,819,008 bytes/request at
@@ -17,6 +18,18 @@ Theoretical Bmax currently uses zero fixed workspace plus a common 2 GiB safety
 margin. It ranges from 186 at `k=0` to 50 at `k=128`; real-runtime Bmax probing is
 implemented separately and must be used for the primary operating curve.
 
+Real-runtime extreme probes now show:
+
+| Endpoint | Theoretical Bmax | Measured Bmax | Peak allocated at Bmax |
+|---|---:|---:|---:|
+| stream2, k=0 | 186 | 157 | 83,784,424,448 bytes |
+| full-resident, k=128 | 50 | 41 | 83,830,419,456 bytes |
+
+The measured KV batch cost of full residency is therefore 116 requests. Batch 158
+for stream2 and batch 42 for full residency failed in the real attention path,
+despite fitting the zero-workspace theoretical accounting. Full-resident successful
+probes had zero decode Expert H2D fetches.
+
 ## Strict LMSYS workload
 
 - Calibration: 256 requests.
@@ -25,6 +38,32 @@ implemented separately and must be used for the primary operating curve.
 - Calibration/evaluation conversation IDs are disjoint.
 - The local snapshot has a strict shortfall of 775 evaluation rows; no rows were
   duplicated or padded.
+
+## Full evaluation routing trace
+
+- Shape: `[1273, 256, 48, 8]`.
+- Routing dtype: `uint8`; forced-token dtype: `int32`.
+- Trace SHA-256:
+  `2dd67a486095614f1ec2071bbf0ac2cfc34fe097def9062bf1c9511f2dbaadac`.
+- The trace validates unique conversation IDs, in-range/non-duplicate top-8 IDs,
+  and exact workload forced-token identity.
+
+At fixed batch 50, stream2 makes 33,691,149 Expert fetches. The key cache result is
+that ascending-ID Quota-LRU thrashes when the batch-level active set approaches all
+128 Experts:
+
+| Policy | k | Hit rate | H2D reduction vs stream2 |
+|---|---:|---:|---:|
+| permanent-k | 8 | 7.56% | 7.56% |
+| quota-LRU-k | 8 | 0.00% | 0.00% |
+| permanent-k | 64 | 58.97% | 58.97% |
+| quota-LRU-k | 64 | 0.072% | 0.072% |
+| permanent-k | 96 | 84.98% | 84.98% |
+| quota-LRU-k | 96 | 7.16% | 7.16% |
+| full-resident | 128 | 100.00% | 100.00% |
+
+This is batch-dependent: the earlier batch-1 runtime smoke showed useful
+Quota-LRU-k=8 reuse, while the fixed-batch-50 trace does not.
 
 ## Real offload smoke result
 
@@ -43,6 +82,18 @@ evictions and 1,126 logical ownership swaps, and performed zero D2D admission
 copies. Natural routing differed from the recorded forced trace for 8.53% of
 assignments before the forced-ID override; effective execution used the recorded
 IDs for every policy.
+
+The Static-KV one-token timeline micro-ablation used pinned staging only as a
+functional check, so its 13-second wall time is dominated by CPU staging. The
+GPU-event interval result was:
+
+| Prefetch depth | Slots | H2D duration | Compute-copy overlap | Overlap ratio |
+|---:|---:|---:|---:|---:|
+| 0 | 1 | 138.39 ms | 0.00 ms | 0.0% |
+| 1 | 2 | 142.38 ms | 71.78 ms | 50.4% |
+
+Both paths produced the same final-logits SHA-256:
+`cc101da1e5b190768df8a9524554f77c9a9a0879e3717ea271c078331dd1fafe`.
 
 ## Implementation invariants
 

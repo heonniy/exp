@@ -13,3 +13,9 @@ experiments/results/*
 !experiments/results/*.csv
 !experiments/results/*.md
 !experiments/results/*.png
+!experiments/results/**/
+!experiments/results/**/*.json
+!experiments/results/**/*.csv
+!experiments/results/**/*.md
+!experiments/results/**/*.png
+experiments/results/trace_sweep_smoke/
