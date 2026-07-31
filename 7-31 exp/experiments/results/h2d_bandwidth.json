@@ -1,0 +1,23 @@
+{
+  "continuous_experts": {
+    "bandwidth_gib_per_second": 50.51134446513078,
+    "copies_per_repeat": 64,
+    "duration_ms_max": 11.177087783813477,
+    "duration_ms_median": 11.136112213134766,
+    "duration_ms_min": 11.103584289550781,
+    "repeats": 20,
+    "size_bytes": 9437184
+  },
+  "gpu_name": "NVIDIA H100 80GB HBM3",
+  "gpu_physical_index": 0,
+  "single_expert": {
+    "bandwidth_gib_per_second": 49.403399490683235,
+    "copies_per_repeat": 1,
+    "duration_ms_max": 0.18979200720787048,
+    "duration_ms_median": 0.17790400236845016,
+    "duration_ms_min": 0.17744000256061554,
+    "repeats": 20,
+    "size_bytes": 9437184
+  },
+  "source_memory": "pinned"
+}

@@ -1,0 +1,32 @@
+{
+  "all_expert_tensor_bytes": 57982058496,
+  "dense_nonexpert_tensor_bytes": 3082186752,
+  "dtype_bytes": {
+    "BF16": 61064245248
+  },
+  "expert_bytes_max": 9437184,
+  "expert_bytes_mean": 9437184.0,
+  "expert_bytes_min": 9437184,
+  "expert_bytes_uniform": true,
+  "expert_components": [
+    {
+      "parameter": "weight",
+      "projection": "down_proj"
+    },
+    {
+      "parameter": "weight",
+      "projection": "gate_proj"
+    },
+    {
+      "parameter": "weight",
+      "projection": "up_proj"
+    }
+  ],
+  "index_total_size": 61064245248,
+  "logical_tensor_bytes": 61064245248,
+  "model_path": "/home/hwlee/model/Qwen3-30B-A3B",
+  "num_expert_instances": 6144,
+  "num_experts_per_layer": 128,
+  "num_layers": 48,
+  "shard_count": 16
+}

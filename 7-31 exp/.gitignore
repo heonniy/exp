@@ -1,0 +1,15 @@
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Generated data and experiment outputs
+artifacts/
+experiments/results/*
+!experiments/results/.gitkeep
+!experiments/results/*.json
+!experiments/results/*.csv
+!experiments/results/*.md
+!experiments/results/*.png

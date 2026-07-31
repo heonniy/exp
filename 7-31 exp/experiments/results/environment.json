@@ -1,0 +1,20 @@
+{
+  "cpu_logical_count": 192,
+  "cpu_model": "x86_64",
+  "cpu_physical_count": 192,
+  "cuda_visible_devices": "0",
+  "gpu0_topology": "\u001b[4mGPU0\tGPU1\tGPU2\tGPU3\tGPU4\tGPU5\tGPU6\tGPU7\tNIC0\tNIC1\tNIC2\tNIC3\tNIC4\tNIC5\tNIC6\tNIC7\tCPU Affinity\tNUMA Affinity\tGPU NUMA ID\u001b[0m\nGPU0\t X \tNV18\tNV18\tNV18\tNV18\tNV18\tNV18\tNV18\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t0-191\t0\t\tN/A\nGPU1\tNV18\t X \tNV18\tNV18\tNV18\tNV18\tNV18\tNV18\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t0-191\t0\t\tN/A\nGPU2\tNV18\tNV18\t X \tNV18\tNV18\tNV18\tNV18\tNV18\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\t0-191\t0\t\tN/A\nGPU3\tNV18\tNV18\tNV18\t X \tNV18\tNV18\tNV18\tNV18\tPHB\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\t0-191\t0\t\tN/A\nGPU4\tNV18\tNV18\tNV18\tNV18\t X \tNV18\tNV18\tNV18\tPHB\tPHB\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\t0-191\t0\t\tN/A\nGPU5\tNV18\tNV18\tNV18\tNV18\tNV18\t X \tNV18\tNV18\tPHB\tPHB\tPHB\tPHB\tPHB\tPIX\tPHB\tPHB\t0-191\t0\t\tN/A\nGPU6\tNV18\tNV18\tNV18\tNV18\tNV18\tNV18\t X \tNV18\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPIX\tPHB\t0-191\t0\t\tN/A\nGPU7\tNV18\tNV18\tNV18\tNV18\tNV18\tNV18\tNV18\t X \tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPIX\t0-191\t0\t\tN/A\nNIC0\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t X \tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t\t\t\t\nNIC1\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t X \tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t\t\t\t\nNIC2\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t X \tPHB\tPHB\tPHB\tPHB\tPHB\t\t\t\t\nNIC3\tPHB\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t X \tPHB\tPHB\tPHB\tPHB\t\t\t\t\nNIC4\tPHB\tPHB\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t X \tPHB\tPHB\tPHB\t\t\t\t\nNIC5\tPHB\tPHB\tPHB\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t X \tPHB\tPHB\t\t\t\t\nNIC6\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t X \tPHB\t\t\t\t\nNIC7\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPIX\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\tPHB\t X \t\t\t\t\n\nLegend:\n\n  X    = Self\n  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)\n  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node\n  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)\n  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\n  PIX  = Connection traversing at most a single PCIe bridge\n  NV#  = Connection traversing a bonded set of # NVLinks\n\nNIC Legend:\n\n  NIC0: mlx5_0\n  NIC1: mlx5_1\n  NIC2: mlx5_2\n  NIC3: mlx5_3\n  NIC4: mlx5_4\n  NIC5: mlx5_5\n  NIC6: mlx5_6\n  NIC7: mlx5_7",
+  "gpu_compute_capability": "9.0",
+  "gpu_logical_index": 0,
+  "gpu_name": "NVIDIA H100 80GB HBM3",
+  "gpu_physical_index": 0,
+  "gpu_sm_count": 132,
+  "gpu_total_hbm_bytes": 85028372480,
+  "host_memory_bytes": 2028780331008,
+  "kernel": "5.15.0-174-generic",
+  "numa_hardware": null,
+  "nvidia_smi_gpu0": "NVIDIA H100 80GB HBM3, 81559, 570.211.01, 00000000:03:00.0, 5, 16",
+  "python_version": "3.10.12",
+  "torch_cuda_runtime": "12.8",
+  "torch_version": "2.7.1+cu128"
+}

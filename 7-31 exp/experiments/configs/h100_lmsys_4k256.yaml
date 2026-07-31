@@ -1,0 +1,42 @@
+experiment:
+  name: h100_lmsys_4k256
+  seed: 731
+  gpu_physical_index: 0
+
+model:
+  path: /home/hwlee/model/Qwen3-30B-A3B
+  dtype: bfloat16
+  num_moe_layers: 48
+  num_experts_per_layer: 128
+  router_top_k: 8
+
+dataset:
+  parquet_glob: /home/hwlee/dataset/*.parquet
+  language: English
+  calibration_requests: 256
+  evaluation_requests: 2048
+  input_tokens: 4096
+  output_tokens: 256
+  output_dir: artifacts/data
+
+runtime:
+  prefetch_mode: current_layer_one_ahead
+  prefetch_depth: 1
+  expert_execution: serial_per_expert
+  expert_execution_order: ascending_expert_id
+  compute_streams: 1
+  copy_streams: 1
+  grouped_gemm: false
+  batched_gemm: false
+  fused_moe: false
+  global_lru: false
+  transient_expert_slots: 2
+  hbm_safety_margin_gib: 2
+  prefix_sharing: false
+  continuous_batching: false
+
+sweep:
+  trace_k: [0, 1, 2, 4, 8, 16, 32, 48, 64, 96, 128]
+  runtime_k: [0, 2, 4, 8, 16, 32, 64, 96, 128]
+  policies: [permanent_k, quota_lru_k]
+
