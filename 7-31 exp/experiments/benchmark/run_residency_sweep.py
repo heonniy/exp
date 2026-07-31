@@ -131,15 +131,47 @@ def main() -> None:
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summaries = [_summary_row(result) for result in results]
+    stream2 = next(result for result in results if result.policy == "stream2")
+    for summary in summaries:
+        persistent_bytes = (
+            evaluation.num_layers * int(summary["k"]) * args.expert_bytes
+        )
+        saved_bytes = stream2.h2d_bytes - int(summary["h2d_bytes"])
+        summary["persistent_expert_bytes"] = persistent_bytes
+        summary["h2d_reduction_vs_stream2"] = (
+            saved_bytes / stream2.h2d_bytes if stream2.h2d_bytes else 0.0
+        )
+        summary["refetch_savings_per_reserved_gib"] = (
+            saved_bytes / (1024**3) / (persistent_bytes / (1024**3))
+            if persistent_bytes
+            else None
+        )
     per_layer = []
+    stream2_layers = {
+        int(row["layer_id"]): row for row in stream2.per_layer
+    }
     for result in results:
         for row in result.per_layer:
+            baseline_fetches = int(
+                stream2_layers[int(row["layer_id"])]["fetches"]
+            )
             per_layer.append(
                 {
                     "policy": result.policy,
                     "k": result.k,
                     "batch_size": result.batch_size,
                     **row,
+                    "hit_rate": (
+                        int(row["hits"]) / int(row["accesses"])
+                        if int(row["accesses"])
+                        else 0.0
+                    ),
+                    "h2d_bytes": int(row["fetches"]) * args.expert_bytes,
+                    "h2d_reduction_vs_stream2": (
+                        1 - int(row["fetches"]) / baseline_fetches
+                        if baseline_fetches
+                        else 0.0
+                    ),
                 }
             )
     _atomic_csv(
@@ -168,4 +200,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
