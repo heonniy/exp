@@ -43,6 +43,61 @@ def test_quota_lru_is_strictly_layer_local() -> None:
     assert policy.resident_counts() == (2, 1)
 
 
+def test_quota_resident_hit_first_preserves_hits_before_admission() -> None:
+    policy = QuotaLRUPolicy(
+        1, 8, 2, access_order="resident_hit_first"
+    )
+    policy.access(0, 1, 0)
+    policy.access(0, 2, 1)
+    assert policy.order_active_experts(0, (0, 1, 2)) == (1, 2, 0)
+
+
+def test_quota_miss_bypass_does_not_thrash_a_full_layer() -> None:
+    policy = QuotaLRUPolicy(
+        1, 8, 2, admission_policy="miss_bypass_when_full"
+    )
+    policy.access(0, 1, 0)
+    policy.access(0, 2, 1)
+    result = policy.access(0, 3, 2)
+    assert result.bypassed
+    assert not result.admitted
+    assert policy.access(0, 1, 3).hit
+
+
+def test_quota_no_admission_is_an_explicit_control() -> None:
+    policy = QuotaLRUPolicy(1, 8, 2, admission_policy="no_admission")
+    result = policy.access(0, 1, 0)
+    assert result.bypassed
+    assert policy.resident_counts() == (0,)
+
+
+def test_quota_window_frequency_requires_repeated_layer_step_presence() -> None:
+    policy = QuotaLRUPolicy(
+        1,
+        8,
+        2,
+        admission_policy="window_frequency",
+        window_size=4,
+        window_min_frequency=2,
+    )
+    policy.begin_layer_step(0, (3,))
+    assert policy.access(0, 3, 0).bypassed
+    policy.begin_layer_step(0, (3,))
+    assert policy.access(0, 3, 1).admitted
+
+
+def test_quota_random_order_is_seed_reproducible() -> None:
+    first = QuotaLRUPolicy(
+        1, 8, 2, access_order="random_expert_order", random_seed=9
+    )
+    second = QuotaLRUPolicy(
+        1, 8, 2, access_order="random_expert_order", random_seed=9
+    )
+    assert first.order_active_experts(0, (0, 1, 2, 3)) == second.order_active_experts(
+        0, (0, 1, 2, 3)
+    )
+
+
 def test_full_resident_has_no_miss() -> None:
     policy = FullResidentPolicy(2, 4)
     for layer in range(2):

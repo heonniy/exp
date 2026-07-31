@@ -1,5 +1,10 @@
 # H100 4K/256 implementation progress
 
+> Historical note: this file describes the original 1,273-request/B=50 phase.
+> The corrected official comparison uses a 1,200-request prefix, batch-step union
+> Permanent scoring, Quota sensitivity controls, and physical common B=40. Read
+> `FEEDBACK_RESPONSE.md` and `completion_4k256_1200/` first.
+
 All GPU measurements in this directory used physical GPU 0 through
 `scripts/gpu0.sh`.
 

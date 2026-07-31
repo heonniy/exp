@@ -86,6 +86,11 @@ class OffloadedExpertEngine:
         self.decode_step: int | None = None
         self.natural_route_assignments = 0
         self.natural_route_mismatches = 0
+        self.natural_route_rows = 0
+        self.natural_route_row_mismatches = 0
+        self.natural_route_set_mismatch_rows = 0
+        self.natural_route_order_only_rows = 0
+        self._routing_mismatch_by_step_layer: dict[tuple[int, int], dict[str, int]] = {}
 
     def execute(
         self,
@@ -108,9 +113,41 @@ class OffloadedExpertEngine:
                     f"runtime shape {tuple(top_k_index.shape)}"
                 )
             self.natural_route_assignments += forced.numel()
-            self.natural_route_mismatches += int(
-                (forced != top_k_index).count_nonzero().item()
+            position_mismatch = forced != top_k_index
+            position_mismatches = int(position_mismatch.count_nonzero().item())
+            row_mismatch = position_mismatch.any(dim=-1)
+            row_mismatches = int(row_mismatch.count_nonzero().item())
+            forced_sorted = forced.sort(dim=-1).values
+            natural_sorted = top_k_index.sort(dim=-1).values
+            set_mismatch = (forced_sorted != natural_sorted).any(dim=-1)
+            set_mismatch_rows = int(set_mismatch.count_nonzero().item())
+            order_only_rows = int((row_mismatch & ~set_mismatch).count_nonzero().item())
+            rows = int(forced.shape[0])
+            self.natural_route_mismatches += position_mismatches
+            self.natural_route_rows += rows
+            self.natural_route_row_mismatches += row_mismatches
+            self.natural_route_set_mismatch_rows += set_mismatch_rows
+            self.natural_route_order_only_rows += order_only_rows
+            key = (self.decode_step, layer_id)
+            detail = self._routing_mismatch_by_step_layer.setdefault(
+                key,
+                {
+                    "decode_step": self.decode_step,
+                    "layer_id": layer_id,
+                    "rows": 0,
+                    "assignments": 0,
+                    "position_mismatches": 0,
+                    "row_mismatches": 0,
+                    "set_mismatch_rows": 0,
+                    "order_only_rows": 0,
+                },
             )
+            detail["rows"] += rows
+            detail["assignments"] += forced.numel()
+            detail["position_mismatches"] += position_mismatches
+            detail["row_mismatches"] += row_mismatches
+            detail["set_mismatch_rows"] += set_mismatch_rows
+            detail["order_only_rows"] += order_only_rows
             top_k_index = forced
         if self.capture_routes:
             self.captured_routes.append(
@@ -138,6 +175,11 @@ class OffloadedExpertEngine:
         self.decode_step = None
         self.natural_route_assignments = 0
         self.natural_route_mismatches = 0
+        self.natural_route_rows = 0
+        self.natural_route_row_mismatches = 0
+        self.natural_route_set_mismatch_rows = 0
+        self.natural_route_order_only_rows = 0
+        self._routing_mismatch_by_step_layer.clear()
 
     def metrics(self) -> dict:
         return {
@@ -155,6 +197,35 @@ class OffloadedExpertEngine:
                 self.natural_route_mismatches / self.natural_route_assignments
                 if self.natural_route_assignments
                 else 0.0
+            ),
+            "natural_route_rows": self.natural_route_rows,
+            "natural_route_row_mismatches": self.natural_route_row_mismatches,
+            "natural_route_row_mismatch_rate": (
+                self.natural_route_row_mismatches / self.natural_route_rows
+                if self.natural_route_rows
+                else 0.0
+            ),
+            "natural_route_set_mismatch_rows": self.natural_route_set_mismatch_rows,
+            "natural_route_set_mismatch_rate": (
+                self.natural_route_set_mismatch_rows / self.natural_route_rows
+                if self.natural_route_rows
+                else 0.0
+            ),
+            "natural_route_order_only_rows": self.natural_route_order_only_rows,
+            "natural_route_order_only_rate": (
+                self.natural_route_order_only_rows / self.natural_route_rows
+                if self.natural_route_rows
+                else 0.0
+            ),
+            "natural_route_mismatch_by_step_layer": [
+                self._routing_mismatch_by_step_layer[key]
+                for key in sorted(self._routing_mismatch_by_step_layer)
+            ],
+            "forced_routing_weight_source": (
+                "natural_router_weights" if self.forced_routing is not None else None
+            ),
+            "forced_routing_weight_alignment_caveat": (
+                self.forced_routing is not None and self.natural_route_mismatches > 0
             ),
         }
 

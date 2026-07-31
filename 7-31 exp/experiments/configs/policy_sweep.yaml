@@ -1,7 +1,6 @@
 trace_k: [0, 1, 2, 4, 8, 16, 32, 48, 64, 96, 128]
-runtime_k: [0, 2, 4, 8, 16, 32, 64, 96, 128]
+runtime_k: [0, 2, 4, 8, 16, 32, 48, 64, 96, 128]
 policies:
   0: [stream2]
   intermediate: [permanent_k, quota_lru_k]
   128: [full_resident]
-

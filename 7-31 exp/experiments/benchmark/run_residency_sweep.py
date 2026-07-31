@@ -17,7 +17,7 @@ from experiments.runtime.policies import (
     QuotaLRUPolicy,
     Stream2Policy,
 )
-from experiments.trace.select_permanent import select_topk
+from experiments.trace.select_permanent import score_experts, select_topk_from_scores
 from experiments.trace.simulator import SimulationResult, simulate
 from experiments.trace.trace_schema import RoutingTrace
 
@@ -26,6 +26,15 @@ _WORKER_EVALUATION: RoutingTrace | None = None
 _WORKER_EXPERT_BYTES = 0
 _WORKER_BATCH_SIZE = 0
 _WORKER_RETAIN_STATE = True
+
+QUOTA_CONTROLS = (
+    "ascending_always_admit",
+    "resident_hit_first",
+    "miss_bypass",
+    "no_admission",
+    "window_frequency",
+    "random_order",
+)
 
 
 def _simulate_worker(policy) -> SimulationResult:
@@ -65,6 +74,98 @@ def _summary_row(result: SimulationResult) -> dict:
     return value
 
 
+def _quota_control_policies(
+    *,
+    num_layers: int,
+    num_experts: int,
+    k: int,
+    controls: tuple[str, ...],
+    random_seeds: tuple[int, ...],
+    window_size: int,
+    window_min_frequency: int,
+) -> list[QuotaLRUPolicy]:
+    policies = []
+    for control in controls:
+        if control == "ascending_always_admit":
+            policies.append(QuotaLRUPolicy(num_layers, num_experts, k))
+        elif control == "resident_hit_first":
+            policies.append(
+                QuotaLRUPolicy(
+                    num_layers,
+                    num_experts,
+                    k,
+                    access_order="resident_hit_first",
+                    name="quota_lru_resident_hit_first",
+                )
+            )
+        elif control == "miss_bypass":
+            policies.append(
+                QuotaLRUPolicy(
+                    num_layers,
+                    num_experts,
+                    k,
+                    admission_policy="miss_bypass_when_full",
+                    name="quota_lru_miss_bypass",
+                )
+            )
+        elif control == "no_admission":
+            policies.append(
+                QuotaLRUPolicy(
+                    num_layers,
+                    num_experts,
+                    k,
+                    admission_policy="no_admission",
+                    name="quota_lru_no_admission",
+                )
+            )
+        elif control == "window_frequency":
+            policies.append(
+                QuotaLRUPolicy(
+                    num_layers,
+                    num_experts,
+                    k,
+                    admission_policy="window_frequency",
+                    window_size=window_size,
+                    window_min_frequency=window_min_frequency,
+                    name="quota_lru_window_frequency",
+                )
+            )
+        elif control == "random_order":
+            for seed in random_seeds:
+                policies.append(
+                    QuotaLRUPolicy(
+                        num_layers,
+                        num_experts,
+                        k,
+                        access_order="random_expert_order",
+                        random_seed=seed,
+                        name=f"quota_lru_random_order_seed{seed}",
+                    )
+                )
+        else:
+            raise ValueError(f"unknown Quota-LRU control: {control}")
+    return policies
+
+
+def _load_measured_bmax(path: Path | None) -> dict[tuple[str, int], int]:
+    if path is None:
+        return {}
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        rows = csv.DictReader(handle)
+        return {
+            (str(row["policy"]), int(row["k"])): int(row["measured_bmax"])
+            for row in rows
+        }
+
+
+def _bmax_policy_name(policy: str) -> str:
+    if policy.startswith("quota_lru_"):
+        return "quota_lru_k"
+    if policy.startswith("permanent_"):
+        return "permanent_k"
+    return policy
+
+
 def run_sweep(
     *,
     evaluation: RoutingTrace,
@@ -76,11 +177,30 @@ def run_sweep(
     permanent_method: str,
     retain_state_across_waves: bool,
     workers: int = 1,
+    quota_controls: tuple[str, ...] = ("ascending_always_admit",),
+    random_seeds: tuple[int, ...] = (731, 732, 733),
+    window_size: int = 8,
+    window_min_frequency: int = 2,
 ) -> list[SimulationResult]:
     if evaluation.num_layers != calibration.num_layers:
         raise ValueError("calibration/evaluation trace layer counts do not match")
     num_layers = evaluation.num_layers
     num_experts = int(evaluation.metadata.get("num_experts", 128))
+    permanent_scores = None
+    if "permanent_k" in policy_names:
+        selection_trace = evaluation if permanent_method == "oracle" else calibration
+        selection_method = (
+            "presence" if permanent_method == "oracle" else permanent_method
+        )
+        permanent_scores = score_experts(
+            selection_trace,
+            selection_method,
+            batch_size=(
+                batch_size
+                if selection_method == "batch_step_union_presence"
+                else None
+            ),
+        )
     policies_to_run = []
     for k in k_values:
         if k == 0:
@@ -90,13 +210,8 @@ def run_sweep(
         else:
             policies = []
             if "permanent_k" in policy_names:
-                selection_trace = (
-                    evaluation if permanent_method == "oracle" else calibration
-                )
-                selection_method = (
-                    "presence" if permanent_method == "oracle" else permanent_method
-                )
-                selected = select_topk(selection_trace, k, selection_method)
+                assert permanent_scores is not None
+                selected = select_topk_from_scores(permanent_scores, k)
                 policies.append(
                     PermanentPolicy(
                         num_layers,
@@ -111,7 +226,17 @@ def run_sweep(
                     )
                 )
             if "quota_lru_k" in policy_names:
-                policies.append(QuotaLRUPolicy(num_layers, num_experts, k))
+                policies.extend(
+                    _quota_control_policies(
+                        num_layers=num_layers,
+                        num_experts=num_experts,
+                        k=k,
+                        controls=quota_controls,
+                        random_seeds=random_seeds,
+                        window_size=window_size,
+                        window_min_frequency=window_min_frequency,
+                    )
+                )
         for policy in policies:
             policies_to_run.append(policy)
     if workers <= 1:
@@ -160,10 +285,46 @@ def main() -> None:
     parser.add_argument("--expert-bytes", type=int, required=True)
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument(
+        "--requests",
+        type=int,
+        help="Use the first N evaluation requests and record the derived trace digest.",
+    )
+    parser.add_argument(
+        "--k-values",
+        nargs="+",
+        type=int,
+        help="Override config trace_k for focused policy-control sweeps.",
+    )
+    parser.add_argument(
         "--permanent-method",
-        choices=["presence", "token_frequency", "streaming_reload", "oracle"],
-        default="presence",
+        choices=[
+            "presence",
+            "token_frequency",
+            "batch_step_union_presence",
+            "streaming_reload",
+            "oracle",
+        ],
+        default="batch_step_union_presence",
         help="oracle selects from evaluation and is a non-deployable upper bound",
+    )
+    parser.add_argument(
+        "--quota-controls",
+        nargs="+",
+        choices=QUOTA_CONTROLS,
+        default=["ascending_always_admit"],
+    )
+    parser.add_argument(
+        "--random-seeds", nargs="+", type=int, default=[731, 732, 733]
+    )
+    parser.add_argument("--window-size", type=int, default=8)
+    parser.add_argument("--window-min-frequency", type=int, default=2)
+    parser.add_argument(
+        "--bmax-csv",
+        type=Path,
+        help=(
+            "Annotate whether this simulated fixed batch is physically feasible; "
+            "an infeasible row is explicitly labeled cache-upper-bound-only."
+        ),
     )
     parser.add_argument(
         "--cold-each-wave",
@@ -183,20 +344,27 @@ def main() -> None:
 
     config = load_config(args.config)
     evaluation = RoutingTrace.load(args.trace)
+    if args.requests is not None:
+        evaluation = evaluation.first_requests(args.requests)
     calibration = RoutingTrace.load(args.calibration_trace)
     results = run_sweep(
         evaluation=evaluation,
         calibration=calibration,
-        k_values=config.trace_k,
+        k_values=(tuple(args.k_values) if args.k_values else config.trace_k),
         policy_names=config.policies,
         expert_bytes=args.expert_bytes,
         batch_size=args.batch_size,
         permanent_method=args.permanent_method,
         retain_state_across_waves=not args.cold_each_wave,
         workers=args.workers,
+        quota_controls=tuple(args.quota_controls),
+        random_seeds=tuple(args.random_seeds),
+        window_size=args.window_size,
+        window_min_frequency=args.window_min_frequency,
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summaries = [_summary_row(result) for result in results]
+    measured_bmax = _load_measured_bmax(args.bmax_csv)
     stream2 = next(result for result in results if result.policy == "stream2")
     for summary in summaries:
         persistent_bytes = (
@@ -211,6 +379,22 @@ def main() -> None:
             saved_bytes / (1024**3) / (persistent_bytes / (1024**3))
             if persistent_bytes
             else None
+        )
+        bmax = measured_bmax.get(
+            (_bmax_policy_name(str(summary["policy"])), int(summary["k"]))
+        )
+        summary["measured_bmax"] = bmax
+        summary["physical_fixed_batch_feasible"] = (
+            args.batch_size <= bmax if bmax is not None else None
+        )
+        summary["evidence_scope"] = (
+            "cache_upper_bound_only"
+            if bmax is not None and args.batch_size > bmax
+            else (
+                "cache_simulation_physical_batch_feasible"
+                if bmax is not None
+                else "cache_simulation_bmax_unknown"
+            )
         )
     per_layer = []
     stream2_layers = {
@@ -258,7 +442,16 @@ def main() -> None:
             "calibration_trace": str(args.calibration_trace),
             "expert_bytes": args.expert_bytes,
             "batch_size": args.batch_size,
+            "requests": evaluation.num_requests,
+            "requested_prefix": args.requests,
+            "k_values": args.k_values or list(config.trace_k),
             "permanent_method": args.permanent_method,
+            "quota_controls": args.quota_controls,
+            "random_seeds": args.random_seeds,
+            "window_size": args.window_size,
+            "window_min_frequency": args.window_min_frequency,
+            "bmax_csv": str(args.bmax_csv) if args.bmax_csv else None,
+            "cache_simulation_only": True,
             "results": summaries,
         },
     )

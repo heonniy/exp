@@ -10,7 +10,7 @@ from experiments.runtime.policies import (
     PermanentPolicy,
     Stream2Policy,
 )
-from experiments.trace.select_permanent import select_topk
+from experiments.trace.select_permanent import score_experts, select_topk
 from experiments.trace.simulator import simulate
 from experiments.trace.trace_schema import RoutingTrace
 
@@ -40,6 +40,14 @@ def test_trace_round_trip(tmp_path: Path) -> None:
     np.testing.assert_array_equal(loaded.routing_expert_ids, trace.routing_expert_ids)
 
 
+def test_trace_request_prefix_has_derived_identity() -> None:
+    trace = synthetic_trace()
+    prefix = trace.first_requests(1)
+    assert prefix.num_requests == 1
+    assert prefix.metadata["source_trace_sha256"] == trace.digest()
+    assert prefix.digest() != trace.digest()
+
+
 def test_stream2_refetch_accounting() -> None:
     trace = synthetic_trace()
     result = simulate(trace, Stream2Policy(1, 4), 100, batch_size=2)
@@ -61,6 +69,31 @@ def test_permanent_selection_and_full_resident() -> None:
     full = simulate(trace, FullResidentPolicy(1, 4), 100, batch_size=2)
     assert full.fetches == 0
     assert full.hit_rate == 1.0
+
+
+def test_batch_step_union_presence_matches_fetch_unit() -> None:
+    trace = RoutingTrace(
+        conversation_ids=np.asarray(["a", "b"]),
+        forced_output_ids=np.asarray([[1, 2, 3], [4, 5, 6]], dtype=np.int32),
+        routing_expert_ids=np.asarray(
+            [
+                [[(0,)], [(1,)], [(1,)]],
+                [[(0,)], [(2,)], [(2,)]],
+            ],
+            dtype=np.uint8,
+        ),
+        metadata={"num_experts": 3},
+    )
+    token_scores = score_experts(trace, "token_frequency")
+    union_scores = score_experts(
+        trace, "batch_step_union_presence", batch_size=2
+    )
+    assert token_scores.tolist() == [[2, 2, 2]]
+    assert union_scores.tolist() == [[1, 2, 2]]
+    assert select_topk(trace, 1, "token_frequency").tolist() == [[0]]
+    assert select_topk(
+        trace, 1, "batch_step_union_presence", batch_size=2
+    ).tolist() == [[1]]
 
 
 def test_batched_router_logits_keep_requests_separate() -> None:

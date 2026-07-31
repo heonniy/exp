@@ -66,6 +66,16 @@ def main() -> None:
     parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
     parser.add_argument("--timeline-events", action="store_true")
     parser.add_argument(
+        "--permanent-method",
+        choices=[
+            "presence",
+            "token_frequency",
+            "batch_step_union_presence",
+            "streaming_reload",
+        ],
+        default="batch_step_union_presence",
+    )
+    parser.add_argument(
         "--output-dir", type=Path, default=Path("experiments/results/runtime_sweep")
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -109,6 +119,8 @@ def main() -> None:
             args.kv_setup,
             "--prefetch-depth",
             str(args.prefetch_depth),
+            "--permanent-method",
+            args.permanent_method,
             "--output",
             str(output),
         ]
@@ -141,6 +153,7 @@ def main() -> None:
             "kv_setup": args.kv_setup,
             "prefetch_depth": args.prefetch_depth,
             "timeline_events": args.timeline_events,
+            "permanent_method": args.permanent_method,
             "dry_run": args.dry_run,
             "runs": commands,
         },

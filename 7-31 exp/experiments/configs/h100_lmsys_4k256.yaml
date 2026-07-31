@@ -14,7 +14,7 @@ dataset:
   parquet_glob: /home/hwlee/dataset/*.parquet
   language: English
   calibration_requests: 256
-  evaluation_requests: 2048
+  evaluation_requests: 1200
   input_tokens: 4096
   output_tokens: 256
   output_dir: artifacts/data
@@ -37,6 +37,5 @@ runtime:
 
 sweep:
   trace_k: [0, 1, 2, 4, 8, 16, 32, 48, 64, 96, 128]
-  runtime_k: [0, 2, 4, 8, 16, 32, 64, 96, 128]
+  runtime_k: [0, 2, 4, 8, 16, 32, 48, 64, 96, 128]
   policies: [permanent_k, quota_lru_k]
-

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections import OrderedDict
+from collections import Counter, OrderedDict, deque
 from dataclasses import dataclass
+import random
 from typing import Iterable
 
 
@@ -13,6 +14,7 @@ class AccessResult:
     admitted: bool = False
     evicted_expert: int | None = None
     resident_lifetime: int | None = None
+    bypassed: bool = False
 
 
 class ExpertPolicy(ABC):
@@ -41,6 +43,25 @@ class ExpertPolicy(ABC):
 
     def reset_dynamic_state(self) -> None:
         """Reset wave-local adaptive state. Static policies need no action."""
+
+    def begin_layer_step(
+        self, layer_id: int, active_experts: tuple[int, ...]
+    ) -> None:
+        """Observe a batch layer-step before its Expert execution order is set."""
+
+    def order_active_experts(
+        self, layer_id: int, active_experts: tuple[int, ...]
+    ) -> tuple[int, ...]:
+        return tuple(sorted(active_experts))
+
+    def simulation_metadata(self) -> dict[str, object]:
+        return {
+            "access_order": "ascending_expert_id",
+            "admission_policy": "not_applicable",
+            "random_seed": None,
+            "window_size": None,
+            "window_min_frequency": None,
+        }
 
 
 class Stream2Policy(ExpertPolicy):
@@ -97,11 +118,108 @@ class PermanentPolicy(ExpertPolicy):
 class QuotaLRUPolicy(ExpertPolicy):
     name = "quota_lru_k"
 
-    def __init__(self, num_layers: int, num_experts: int, k: int):
+    VALID_ACCESS_ORDERS = {
+        "ascending_expert_id",
+        "resident_hit_first",
+        "random_expert_order",
+    }
+    VALID_ADMISSION_POLICIES = {
+        "always_admit",
+        "miss_bypass_when_full",
+        "no_admission",
+        "window_frequency",
+    }
+
+    def __init__(
+        self,
+        num_layers: int,
+        num_experts: int,
+        k: int,
+        *,
+        access_order: str = "ascending_expert_id",
+        admission_policy: str = "always_admit",
+        random_seed: int = 731,
+        window_size: int = 8,
+        window_min_frequency: int = 2,
+        name: str | None = None,
+    ):
         super().__init__(num_layers, num_experts, k)
+        if access_order not in self.VALID_ACCESS_ORDERS:
+            raise ValueError(f"invalid Quota-LRU access order: {access_order}")
+        if admission_policy not in self.VALID_ADMISSION_POLICIES:
+            raise ValueError(
+                f"invalid Quota-LRU admission policy: {admission_policy}"
+            )
+        if window_size <= 0:
+            raise ValueError("window_size must be positive")
+        if not 1 <= window_min_frequency <= window_size:
+            raise ValueError("window_min_frequency must be in [1, window_size]")
+        self.access_order = access_order
+        self.admission_policy = admission_policy
+        self.random_seed = random_seed
+        self.window_size = window_size
+        self.window_min_frequency = window_min_frequency
+        self.name = name or "quota_lru_k"
+        self._rng = random.Random(random_seed)
         self._layers: list[OrderedDict[int, int]] = [
             OrderedDict() for _ in range(num_layers)
         ]
+        self._windows: list[deque[frozenset[int]]] = [
+            deque() for _ in range(num_layers)
+        ]
+        self._window_counts: list[Counter[int]] = [
+            Counter() for _ in range(num_layers)
+        ]
+
+    def begin_layer_step(
+        self, layer_id: int, active_experts: tuple[int, ...]
+    ) -> None:
+        if self.admission_policy != "window_frequency":
+            return
+        window = self._windows[layer_id]
+        counts = self._window_counts[layer_id]
+        current = frozenset(active_experts)
+        window.append(current)
+        counts.update(current)
+        if len(window) > self.window_size:
+            expired = window.popleft()
+            counts.subtract(expired)
+            for expert_id in expired:
+                if counts[expert_id] == 0:
+                    del counts[expert_id]
+
+    def order_active_experts(
+        self, layer_id: int, active_experts: tuple[int, ...]
+    ) -> tuple[int, ...]:
+        ordered = tuple(sorted(active_experts))
+        if self.access_order == "ascending_expert_id":
+            return ordered
+        if self.access_order == "resident_hit_first":
+            residents = self._layers[layer_id]
+            return tuple(
+                sorted(
+                    ordered,
+                    key=lambda expert_id: (
+                        expert_id not in residents,
+                        expert_id,
+                    ),
+                )
+            )
+        shuffled = list(ordered)
+        self._rng.shuffle(shuffled)
+        return tuple(shuffled)
+
+    def _should_admit(self, layer_id: int, expert_id: int) -> bool:
+        if self.admission_policy == "always_admit":
+            return True
+        if self.admission_policy == "no_admission":
+            return False
+        if self.admission_policy == "miss_bypass_when_full":
+            return len(self._layers[layer_id]) < self.k
+        return (
+            self._window_counts[layer_id].get(expert_id, 0)
+            >= self.window_min_frequency
+        )
 
     def access(self, layer_id: int, expert_id: int, tick: int) -> AccessResult:
         self._validate(layer_id, expert_id)
@@ -112,6 +230,8 @@ class QuotaLRUPolicy(ExpertPolicy):
             return AccessResult(hit=True, hit_kind="local_lru")
         if self.k == 0:
             return AccessResult(hit=False)
+        if not self._should_admit(layer_id, expert_id):
+            return AccessResult(hit=False, bypassed=True)
 
         evicted = None
         lifetime = None
@@ -133,6 +253,32 @@ class QuotaLRUPolicy(ExpertPolicy):
     def reset_dynamic_state(self) -> None:
         for cache in self._layers:
             cache.clear()
+        for window in self._windows:
+            window.clear()
+        for counts in self._window_counts:
+            counts.clear()
+        self._rng = random.Random(self.random_seed)
+
+    def simulation_metadata(self) -> dict[str, object]:
+        return {
+            "access_order": self.access_order,
+            "admission_policy": self.admission_policy,
+            "random_seed": (
+                self.random_seed
+                if self.access_order == "random_expert_order"
+                else None
+            ),
+            "window_size": (
+                self.window_size
+                if self.admission_policy == "window_frequency"
+                else None
+            ),
+            "window_min_frequency": (
+                self.window_min_frequency
+                if self.admission_policy == "window_frequency"
+                else None
+            ),
+        }
 
 
 class FullResidentPolicy(ExpertPolicy):

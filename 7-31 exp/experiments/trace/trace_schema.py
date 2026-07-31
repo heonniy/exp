@@ -70,6 +70,20 @@ class RoutingTrace:
             hasher.update(b"\0")
         return hasher.hexdigest()
 
+    def first_requests(self, count: int) -> "RoutingTrace":
+        if not 0 < count <= self.num_requests:
+            raise ValueError("requested trace prefix is outside available requests")
+        metadata = dict(self.metadata)
+        metadata["source_trace_sha256"] = self.digest()
+        metadata["request_prefix_count"] = count
+        metadata.pop("trace_sha256", None)
+        return RoutingTrace(
+            conversation_ids=self.conversation_ids[:count].copy(),
+            forced_output_ids=self.forced_output_ids[:count].copy(),
+            routing_expert_ids=self.routing_expert_ids[:count].copy(),
+            metadata=metadata,
+        )
+
     def save(self, path: str | Path) -> None:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -145,4 +159,3 @@ def concatenate_parts(parts: list[Path], output: Path, metadata: dict[str, Any])
         metadata=metadata,
     )
     trace.save(output)
-

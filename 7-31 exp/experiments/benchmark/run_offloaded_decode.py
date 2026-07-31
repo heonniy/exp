@@ -75,6 +75,8 @@ def _manager(
     num_experts: int,
     host_store: PinnedExpertStore,
     calibration_trace: RoutingTrace | None,
+    permanent_method: str = "batch_step_union_presence",
+    permanent_batch_size: int | None = None,
 ) -> tuple[object, float]:
     started = time.perf_counter()
     if policy == "stream2":
@@ -84,7 +86,16 @@ def _manager(
     elif policy == "permanent_k":
         if calibration_trace is None:
             raise ValueError("permanent_k requires --calibration-trace")
-        selections = select_topk(calibration_trace, k, "presence")
+        selections = select_topk(
+            calibration_trace,
+            k,
+            permanent_method,
+            batch_size=(
+                permanent_batch_size
+                if permanent_method == "batch_step_union_presence"
+                else None
+            ),
+        )
         manager = PermanentRuntimeManager(
             selections.tolist(),
             EXPERT_SHAPES,
@@ -131,6 +142,16 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--decode-steps", type=int)
     parser.add_argument("--calibration-trace", type=Path)
+    parser.add_argument(
+        "--permanent-method",
+        choices=[
+            "presence",
+            "token_frequency",
+            "batch_step_union_presence",
+            "streaming_reload",
+        ],
+        default="batch_step_union_presence",
+    )
     parser.add_argument(
         "--forced-routing-trace",
         type=Path,
@@ -240,6 +261,8 @@ def main() -> None:
         config.model.num_experts_per_layer,
         host_store,
         calibration,
+        permanent_method=args.permanent_method,
+        permanent_batch_size=args.batch_size,
     )
     engine = OffloadedExpertEngine(
         host_store,
@@ -327,6 +350,9 @@ def main() -> None:
         "gpu_physical_index": 0,
         "policy": args.policy,
         "k": args.k,
+        "permanent_method": (
+            args.permanent_method if args.policy == "permanent_k" else None
+        ),
         "batch_size": args.batch_size,
         "decode_steps": steps,
         "generated_tokens": generated,
@@ -378,6 +404,12 @@ def main() -> None:
         .hexdigest(),
         "forced_routing_trace_sha256": forced_routing_trace_sha256,
         "forced_routing_ids_sha256": forced_routing_ids_sha256,
+        "natural_routing_reference_comparable": args.kv_setup == "real_prefill",
+        "natural_routing_mismatch_interpretation": (
+            "same_prompt_prefill_numerical_drift"
+            if args.kv_setup == "real_prefill"
+            else "invalid_reference_context_static_zero_kv"
+        ),
         "final_logits_sha256": final_logits_sha256,
         **engine_metrics,
     }

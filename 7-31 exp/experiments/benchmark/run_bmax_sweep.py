@@ -23,6 +23,16 @@ def main() -> None:
     parser.add_argument("--expert-bytes", type=int, required=True)
     parser.add_argument("--dense-bytes", type=int, required=True)
     parser.add_argument("--fixed-workspace-bytes", type=int, default=0)
+    parser.add_argument(
+        "--permanent-method",
+        choices=[
+            "presence",
+            "token_frequency",
+            "batch_step_union_presence",
+            "streaming_reload",
+        ],
+        default="batch_step_union_presence",
+    )
     parser.add_argument("--max-batch", type=int)
     parser.add_argument(
         "--output-dir", type=Path, default=Path("experiments/results/bmax")
@@ -61,6 +71,8 @@ def main() -> None:
             str(args.dense_bytes),
             "--fixed-workspace-bytes",
             str(args.fixed_workspace_bytes),
+            "--permanent-method",
+            args.permanent_method,
             "--max-pinned-experts",
             str(config.model.num_moe_layers * config.model.num_experts_per_layer),
             "--output",
@@ -79,6 +91,7 @@ def main() -> None:
             "gpu_physical_index": 0,
             "dry_run": args.dry_run,
             "probe_mode": "real_runtime_static_peak_kv_one_decode_step",
+            "permanent_method": args.permanent_method,
             "runs": runs,
         },
     )

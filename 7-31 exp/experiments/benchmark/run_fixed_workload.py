@@ -10,7 +10,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from experiments.benchmark.run_offloaded_decode import _manager, _read_examples
+from experiments.benchmark.run_offloaded_decode import (
+    CudaModuleTimer,
+    _manager,
+    _read_examples,
+)
 from experiments.common.config import load_config
 from experiments.common.gpu import require_gpu0
 from experiments.common.io import atomic_write_json
@@ -37,6 +41,20 @@ SUM_METRICS = (
     "d2d_admission_copies",
     "natural_route_assignments",
     "natural_route_mismatches",
+    "natural_route_rows",
+    "natural_route_row_mismatches",
+    "natural_route_set_mismatch_rows",
+    "natural_route_order_only_rows",
+)
+
+TIMING_METRICS = (
+    "host_prepare_seconds",
+    "total_h2d_duration_ms",
+    "exposed_h2d_stall_ms",
+    "overlapped_h2d_ms",
+    "compute_stream_h2d_wait_ms",
+    "first_miss_stall_ms",
+    "expert_compute_ms",
 )
 
 
@@ -49,6 +67,14 @@ def _metric_delta(before: dict, after: dict, name: str) -> int:
     return int(after.get(name, 0)) - int(before.get(name, 0))
 
 
+def _timing_delta(before: dict, after: dict, name: str) -> float | None:
+    before_value = before.get(name)
+    after_value = after.get(name)
+    if before_value is None or after_value is None:
+        return None
+    return float(after_value) - float(before_value)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -59,6 +85,16 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--workload", type=Path, required=True)
     parser.add_argument("--calibration-trace", type=Path)
+    parser.add_argument(
+        "--permanent-method",
+        choices=[
+            "presence",
+            "token_frequency",
+            "batch_step_union_presence",
+            "streaming_reload",
+        ],
+        default="batch_step_union_presence",
+    )
     parser.add_argument("--forced-routing-trace", type=Path, required=True)
     parser.add_argument(
         "--policy",
@@ -71,6 +107,7 @@ def main() -> None:
     parser.add_argument("--requests", type=int)
     parser.add_argument("--cold-each-wave", action="store_true")
     parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
+    parser.add_argument("--timeline-events", action="store_true")
     parser.add_argument("--max-pinned-experts", type=int, default=6144)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -137,18 +174,25 @@ def main() -> None:
             config.model.num_experts_per_layer,
             host_store,
             calibration,
+            permanent_method=args.permanent_method,
+            permanent_batch_size=args.batch_size,
         )
         policy_initialization_seconds += elapsed
         engine = OffloadedExpertEngine(
             host_store,
             manager,
             prefetch_depth=args.prefetch_depth,
-            track_timeline=False,
+            track_timeline=args.timeline_events,
         )
         attach_engine(model, engine)
 
     initialize_policy()
     totals = {name: 0 for name in SUM_METRICS}
+    timing_totals = {name: 0.0 for name in TIMING_METRICS}
+    routing_mismatch_totals: dict[tuple[int, int], dict[str, int]] = {}
+    attention_total_ms = 0.0
+    router_total_ms = 0.0
+    other_dense_host_idle_total_ms = 0.0
     waves = []
     kv_setup_seconds = 0.0
     full_wave_seconds = []
@@ -175,6 +219,14 @@ def main() -> None:
         forced_routing = trace.routing_expert_ids[start:stop, :steps]
         engine.set_forced_routing(forced_routing)
         before = engine.metrics()
+        attention_timer = router_timer = None
+        if args.timeline_events:
+            attention_timer = CudaModuleTimer(
+                [layer.self_attn for layer in model.model.layers]
+            )
+            router_timer = CudaModuleTimer(
+                [layer.mlp.gate for layer in model.model.layers]
+            )
         torch.cuda.synchronize()
         started = time.perf_counter()
         with torch.inference_mode():
@@ -197,8 +249,62 @@ def main() -> None:
         torch.cuda.synchronize()
         elapsed = time.perf_counter() - started
         after = engine.metrics()
+        for detail in after["natural_route_mismatch_by_step_layer"]:
+            key = (int(detail["decode_step"]), int(detail["layer_id"]))
+            aggregate = routing_mismatch_totals.setdefault(
+                key,
+                {
+                    "decode_step": key[0],
+                    "layer_id": key[1],
+                    "rows": 0,
+                    "assignments": 0,
+                    "position_mismatches": 0,
+                    "row_mismatches": 0,
+                    "set_mismatch_rows": 0,
+                    "order_only_rows": 0,
+                },
+            )
+            for name in (
+                "rows",
+                "assignments",
+                "position_mismatches",
+                "row_mismatches",
+                "set_mismatch_rows",
+                "order_only_rows",
+            ):
+                aggregate[name] += int(detail[name])
+        attention_ms = attention_timer.elapsed_ms() if attention_timer else None
+        router_ms = router_timer.elapsed_ms() if router_timer else None
+        if attention_timer:
+            attention_timer.remove()
+        if router_timer:
+            router_timer.remove()
         for name in SUM_METRICS:
             totals[name] += _metric_delta(before, after, name)
+        wave_timings = {
+            name: _timing_delta(before, after, name) for name in TIMING_METRICS
+        }
+        for name, value in wave_timings.items():
+            if value is not None:
+                timing_totals[name] += value
+        other_dense_host_idle_ms = (
+            max(
+                0.0,
+                elapsed * 1000
+                - float(attention_ms)
+                - float(router_ms)
+                - float(wave_timings["expert_compute_ms"])
+                - float(wave_timings["exposed_h2d_stall_ms"]),
+            )
+            if args.timeline_events
+            else None
+        )
+        if attention_ms is not None:
+            attention_total_ms += attention_ms
+        if router_ms is not None:
+            router_total_ms += router_ms
+        if other_dense_host_idle_ms is not None:
+            other_dense_host_idle_total_ms += other_dense_host_idle_ms
         digest = hashlib.sha256(
             output.logits.detach()
             .to(device="cpu")
@@ -223,6 +329,24 @@ def main() -> None:
                 "expert_h2d_fetches": _metric_delta(
                     before, after, "expert_h2d_fetches"
                 ),
+                **wave_timings,
+                "attention_ms": attention_ms,
+                "router_ms": router_ms,
+                "other_dense_host_idle_ms": other_dense_host_idle_ms,
+                "natural_route_mismatch_rate": (
+                    _metric_delta(before, after, "natural_route_mismatches")
+                    / _metric_delta(before, after, "natural_route_assignments")
+                    if _metric_delta(before, after, "natural_route_assignments")
+                    else 0.0
+                ),
+                "natural_route_set_mismatch_rate": (
+                    _metric_delta(
+                        before, after, "natural_route_set_mismatch_rows"
+                    )
+                    / _metric_delta(before, after, "natural_route_rows")
+                    if _metric_delta(before, after, "natural_route_rows")
+                    else 0.0
+                ),
                 "final_logits_sha256": digest,
             }
         )
@@ -242,6 +366,9 @@ def main() -> None:
         "gpu_physical_index": 0,
         "policy": args.policy,
         "k": args.k,
+        "permanent_method": (
+            args.permanent_method if args.policy == "permanent_k" else None
+        ),
         "batch_size": args.batch_size,
         "requests": requests,
         "decode_steps": steps,
@@ -272,6 +399,10 @@ def main() -> None:
         "model_load_seconds": model_load_seconds,
         "policy_initialization_seconds": policy_initialization_seconds,
         "forced_routing_trace_sha256": trace.digest(),
+        "natural_routing_reference_comparable": False,
+        "natural_routing_mismatch_interpretation": (
+            "invalid_reference_context_static_zero_kv"
+        ),
         "forced_output_ids_sha256": hashlib.sha256(
             workload_forced.tobytes()
         ).hexdigest(),
@@ -280,6 +411,35 @@ def main() -> None:
             totals["natural_route_mismatches"] / natural_assignments
             if natural_assignments
             else 0.0
+        ),
+        "natural_route_row_mismatch_rate": (
+            totals["natural_route_row_mismatches"] / totals["natural_route_rows"]
+            if totals["natural_route_rows"]
+            else 0.0
+        ),
+        "natural_route_set_mismatch_rate": (
+            totals["natural_route_set_mismatch_rows"] / totals["natural_route_rows"]
+            if totals["natural_route_rows"]
+            else 0.0
+        ),
+        "natural_route_order_only_rate": (
+            totals["natural_route_order_only_rows"] / totals["natural_route_rows"]
+            if totals["natural_route_rows"]
+            else 0.0
+        ),
+        "forced_routing_weight_source": "natural_router_weights",
+        "forced_routing_weight_alignment_caveat": (
+            totals["natural_route_mismatches"] > 0
+        ),
+        "natural_route_mismatch_by_step_layer": [
+            routing_mismatch_totals[key] for key in sorted(routing_mismatch_totals)
+        ],
+        "timeline_events_enabled": args.timeline_events,
+        **timing_totals,
+        "attention_ms": attention_total_ms if args.timeline_events else None,
+        "router_ms": router_total_ms if args.timeline_events else None,
+        "other_dense_host_idle_ms": (
+            other_dense_host_idle_total_ms if args.timeline_events else None
         ),
         **totals,
         "wave_results": waves,

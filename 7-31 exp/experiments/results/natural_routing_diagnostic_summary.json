@@ -1,0 +1,31 @@
+{
+  "config": "h100_lmsys_4k256",
+  "gpu_physical_index": 0,
+  "reference_trace_sha256": "2dd67a486095614f1ec2071bbf0ac2cfc34fe097def9062bf1c9511f2dbaadac",
+  "real_prefill_4step_batch1": {
+    "natural_routing_reference_comparable": true,
+    "position_assignments": 1536,
+    "position_mismatches": 103,
+    "position_mismatch_rate": 0.06705729166666667,
+    "route_rows": 192,
+    "row_mismatches": 51,
+    "row_mismatch_rate": 0.265625,
+    "set_mismatch_rows": 11,
+    "set_mismatch_rate": 0.057291666666666664,
+    "order_only_rows": 40,
+    "order_only_rate": 0.20833333333333334,
+    "order_only_share_of_mismatching_rows": 0.7843137254901961,
+    "interpretation": "Most mismatching rows preserve the same active Expert set and differ only in top-k order. Eleven of 192 token-layer rows change the Expert set and remain a numerical-equivalence caveat."
+  },
+  "static_zero_1step_batch1": {
+    "natural_routing_reference_comparable": false,
+    "position_assignments": 384,
+    "position_mismatches": 374,
+    "position_mismatch_rate": 0.9739583333333334,
+    "route_rows": 48,
+    "set_mismatch_rows": 48,
+    "set_mismatch_rate": 1.0,
+    "interpretation": "The zero-valued KV fixture is not the reference prompt context, so this mismatch must not be used as a numerical-equivalence measurement."
+  },
+  "forced_routing_caveat": "Forced Expert IDs use weights produced by the natural runtime router. Relative policy comparisons remain workload-aligned when logits digests match across policies, but they are not a proof of exact equivalence to the full-model reference execution."
+}

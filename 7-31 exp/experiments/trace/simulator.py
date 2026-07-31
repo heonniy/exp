@@ -19,6 +19,8 @@ class LayerStats:
     compulsory_loads: int = 0
     refetches: int = 0
     evictions: int = 0
+    admissions: int = 0
+    bypasses: int = 0
 
 
 @dataclass
@@ -37,6 +39,8 @@ class SimulationResult:
     compulsory_loads: int
     refetches: int
     evictions: int
+    admissions: int
+    bypasses: int
     h2d_bytes: int
     h2d_bytes_per_generated_token: float
     hit_rate: float
@@ -45,6 +49,11 @@ class SimulationResult:
     average_evicted_resident_lifetime: float | None
     trace_sha256: str
     retain_state_across_waves: bool
+    access_order: str
+    admission_policy: str
+    random_seed: int | None
+    window_size: int | None
+    window_min_frequency: int | None
     per_layer: list[dict]
 
     def as_dict(self) -> dict:
@@ -68,6 +77,7 @@ def simulate(
     per_layer = [LayerStats(layer_id=i) for i in range(trace.num_layers)]
     seen: set[tuple[int, int]] = set()
     hits = misses = fetches = compulsory = refetches = evictions = executions = 0
+    admissions = bypasses = 0
     lifetimes: list[int] = []
     tick = 0
 
@@ -77,12 +87,19 @@ def simulate(
         stop = min(start + batch_size, trace.num_requests)
         for step in range(trace.output_tokens):
             for layer_id in range(trace.num_layers):
-                active = np.unique(
-                    trace.routing_expert_ids[start:stop, step, layer_id, :]
+                active = tuple(
+                    int(value)
+                    for value in np.unique(
+                        trace.routing_expert_ids[start:stop, step, layer_id, :]
+                    )
                 )
-                # np.unique is ascending, which fixes the policy-sensitive order.
-                for raw_expert_id in active:
-                    expert_id = int(raw_expert_id)
+                policy.begin_layer_step(layer_id, active)
+                ordered = policy.order_active_experts(layer_id, active)
+                if len(ordered) != len(active) or set(ordered) != set(active):
+                    raise AssertionError(
+                        "policy execution order must preserve the active Expert set"
+                    )
+                for expert_id in ordered:
                     result = policy.access(layer_id, expert_id, tick)
                     tick += 1
                     executions += 1
@@ -109,6 +126,12 @@ def simulate(
                         layer.evictions += 1
                     if result.resident_lifetime is not None:
                         lifetimes.append(result.resident_lifetime)
+                    if result.admitted:
+                        admissions += 1
+                        layer.admissions += 1
+                    if result.bypassed:
+                        bypasses += 1
+                        layer.bypasses += 1
 
                 resident = policy.resident_counts()
                 if any(count > policy.k for count in resident):
@@ -116,6 +139,7 @@ def simulate(
 
     assignments = int(trace.routing_expert_ids.size)
     generated = trace.num_requests * trace.output_tokens
+    metadata = policy.simulation_metadata()
     return SimulationResult(
         policy=policy.name,
         k=policy.k,
@@ -131,6 +155,8 @@ def simulate(
         compulsory_loads=compulsory,
         refetches=refetches,
         evictions=evictions,
+        admissions=admissions,
+        bypasses=bypasses,
         h2d_bytes=fetches * expert_bytes,
         h2d_bytes_per_generated_token=(fetches * expert_bytes / generated),
         hit_rate=(hits / executions if executions else 0.0),
@@ -141,6 +167,22 @@ def simulate(
         ),
         trace_sha256=trace.digest(),
         retain_state_across_waves=retain_state_across_waves,
+        access_order=str(metadata["access_order"]),
+        admission_policy=str(metadata["admission_policy"]),
+        random_seed=(
+            int(metadata["random_seed"])
+            if metadata["random_seed"] is not None
+            else None
+        ),
+        window_size=(
+            int(metadata["window_size"])
+            if metadata["window_size"] is not None
+            else None
+        ),
+        window_min_frequency=(
+            int(metadata["window_min_frequency"])
+            if metadata["window_min_frequency"] is not None
+            else None
+        ),
         per_layer=[asdict(layer) for layer in per_layer],
     )
-

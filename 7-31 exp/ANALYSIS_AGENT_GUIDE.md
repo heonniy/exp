@@ -14,26 +14,38 @@ The implementation target and invariant definitions are in
 
 ## 2. Read these files in order
 
-1. `experiments/results/progress.md`
-   - Concise status, validated measurements, current findings, and limitations.
-2. `experiments/results/bmax/bmax.csv`
-   - Real-runtime HBM endpoints. Prefer `measured_bmax` over theoretical Bmax.
-3. `experiments/results/trace_sweep_b50/cache_summary.csv`
-   - Full 1,273-request cache simulation at fixed batch 50.
-4. `experiments/results/trace_sweep_b50/per_layer.csv`
-   - Layer-level hits, refetches, evictions, and traffic reduction.
-5. `experiments/results/trace_sweep_b50/trace_diagnostics.png`
-   - Visual summary of hit rate, H2D traffic, refetches, and layer variation.
-6. `experiments/results/offloaded_smoke_summary.csv`
-   - Real pinned-weight offload integration smoke for stream2, Permanent-k=8,
-     and Quota-LRU-k=8. It is only four decode tokens at batch 1.
-7. `experiments/results/offloaded_stream1_static_timeline_smoke.json` and
-   `experiments/results/offloaded_stream2_static_timeline_smoke.json`
-   - One-slot no-prefetch versus two-slot one-ahead CUDA-event validation.
-8. `experiments/results/environment.json`, `expert_bytes.json`,
-   `h2d_bandwidth.json`, `compute_copy_overlap.json`, and
-   `memory_breakdown.csv`
-   - Hardware, checkpoint, transfer, overlap, and theoretical accounting inputs.
+1. `FEEDBACK_RESPONSE.md`
+   - Review findings, implementation mapping, and corrected experiment protocol.
+2. `experiments/results/completion_4k256_1200/manifest.json`
+   - Restartable 1,200-request completion matrix and per-run completion state.
+3. `experiments/results/completion_4k256_1200/bmax/bmax.csv`
+   - Real-runtime Bmax for every primary policy/k after the completion run.
+4. `experiments/results/completion_4k256_1200/runtime_at_bmax/`
+   - Full 256-step, 1,200-request workloads at each measured Bmax.
+5. `experiments/results/completion_4k256_1200/runtime_common_b40/`
+   - Physical common-batch runtime; B=40 is no larger than full-resident Bmax 41.
+6. `experiments/results/natural_routing_diagnostic_summary.json`
+   - Same-prompt real-prefill and non-comparable static-zero mismatch breakdown.
+7. `experiments/results/progress.md`
+   - Historical status and the earlier 1,273-request/B=50 cache sweep.
+8. `experiments/results/bmax/bmax.csv`
+   - Earlier real-runtime HBM endpoints.
+9. `experiments/results/trace_sweep_b50/cache_summary.csv`
+   - Historical 1,273-request cache simulation at fixed batch 50. The
+     full-resident row is a cache upper bound, not a physical runtime point.
+10. `experiments/results/trace_sweep_b50/per_layer.csv`
+    - Layer-level hits, refetches, evictions, and traffic reduction.
+11. `experiments/results/trace_sweep_b50/trace_diagnostics.png`
+    - Visual summary of hit rate, H2D traffic, refetches, and layer variation.
+12. `experiments/results/offloaded_smoke_summary.csv`
+    - Real pinned-weight integration smokes only.
+13. `experiments/results/offloaded_stream1_static_timeline_smoke.json` and
+    `experiments/results/offloaded_stream2_static_timeline_smoke.json`
+    - One-slot no-prefetch versus two-slot one-ahead validation.
+14. `experiments/results/environment.json`, `expert_bytes.json`,
+    `h2d_bandwidth.json`, `compute_copy_overlap.json`, and
+    `memory_breakdown.csv`
+    - Hardware, checkpoint, transfer, overlap, and accounting inputs.
 
 Inspect implementation details only after understanding the results:
 
@@ -50,8 +62,8 @@ Inspect implementation details only after understanding the results:
 Use the following priority when evidence differs:
 
 1. Real-runtime measured Bmax is stronger than theoretical memory accounting.
-2. Full 1,273-request trace results are stronger than smoke trace results for
-   cache behavior.
+2. Full 1,200-request completion results are the official comparison set. The
+   earlier 1,273-request trace remains useful historical cache evidence.
 3. Pinned-weight offload measurements are stronger than pinned-staging wall time
    for throughput. Pinned-staging timeline runs are functional/timeline checks.
 4. Trace simulation predicts Expert traffic and cache behavior; it does not prove
@@ -72,7 +84,7 @@ evaluation routing trace SHA-256 is:
 - Full residency therefore costs 116 feasible requests relative to stream2.
 - Successful full-resident probes have zero decode Expert H2D fetches.
 
-### Fixed-batch-50 cache behavior
+### Historical fixed-batch-50 cache behavior
 
 - Stream2 performs 33,691,149 Expert fetches.
 - Permanent-k reaches 58.97% hit rate at k=64 and 84.98% at k=96.
@@ -80,6 +92,20 @@ evaluation routing trace SHA-256 is:
 - The Quota result is consistent with cyclic ascending-ID scans over a
   batch-level active set approaching all 128 Experts. It is batch-dependent, not
   a universal statement that Quota-LRU is ineffective.
+- Full-resident B=50 is not physical because measured Bmax is 41. Treat it as a
+  cache upper bound only.
+- Read the resident-first, bypass, window-frequency, and random-order controls
+  before attributing the baseline miss rate to Quota-LRU generally.
+
+### Natural-routing diagnostic
+
+- Same-prompt real-prefill has 103/1,536 positional mismatches.
+- At route-row level, 51/192 rows differ; 40 are order-only and 11 change the
+  active Expert set.
+- Static-zero KV is a different context and is non-comparable with the reference
+  routing trace.
+- Forced IDs use natural runtime router weights. Relative policy comparisons are
+  supported when final-logits hashes agree, but exact reference equivalence is not.
 
 ### Prefetch correctness
 
@@ -100,8 +126,8 @@ does not yet contain all of the following primary measurements:
 - Nsight Systems validation for k=0, the eventual optimal k, and k=128.
 - Representative pinned-weight timeline results beyond the integration smokes.
 
-The strict local LMSYS snapshot also has only 1,273 eligible evaluation rows rather
-than the requested 2,048. Never describe the results as a 2,048-request evaluation.
+The official completion comparison uses the first 1,200 eligible evaluation rows.
+Never describe it as a 1,273- or 2,048-request completion run.
 
 ## 6. Required decision procedure
 
@@ -124,7 +150,7 @@ Then judge in this order:
 3. Use fixed-batch throughput to isolate residency effects from batch effects.
 4. Confirm that H2D savings reduce exposed stall rather than only total traffic.
 5. Compare full-workload makespan, including cold/warm state and partial waves.
-6. Report uncertainty from the 1,273-request sample and incomplete intermediate
+6. Report uncertainty from the 1,200-request sample and incomplete intermediate
    runtime points.
 
 The final recommendation should distinguish a deployable Permanent/Quota policy

@@ -440,7 +440,7 @@ assistant text
 
 ```yaml
 calibration_requests: 256
-evaluation_requests: 2048
+evaluation_requests: 1200
 ```
 
 - Calibration: Permanent Expert 선택
@@ -528,11 +528,12 @@ Global LRU: 없음
 
 ### Permanent Expert 선정 기준
 
-기본 점수:
+기본 fetch-aligned 점수:
 
 ```text
-step_presence_count(layer, expert)
-= calibration의 몇 개 layer-step에서 해당 Expert가 한 번 이상 필요했는가
+batch_step_union_presence(layer, expert)
+= calibration의 (batch wave × decode step × layer) 중 해당 Expert가
+  한 번 이상 필요했던 횟수
 ```
 
 이 점수는 weight fetch를 얼마나 자주 방지할 수 있는지에 직접 대응한다.
@@ -540,14 +541,14 @@ step_presence_count(layer, expert)
 추가 점수:
 
 ```text
-token_assignment_count(layer, expert)
+token_assignment_count(layer, expert)  # 기존 presence 구현, baseline
 reload_count_under_streaming(layer, expert)
 ```
 
 구현 policy:
 
 ```text
-permanent_presence_topk
+permanent_batch_step_union_presence_topk
 permanent_token_frequency_topk
 permanent_oracle_topk
 ```
@@ -599,7 +600,18 @@ expert_execution_order: ascending_expert_id
 
 로 고정한다.
 
-모든 run에서 동일 순서를 사용한다.
+Primary run은 이 순서를 사용한다. 다음 sensitivity control은 별도 결과로
+반드시 기록한다.
+
+```text
+resident-hit-first ordering
+miss bypass when quota is full
+no-admission
+window-frequency admission
+random Expert order (3개 이상의 고정 seed)
+```
+
+Control 결과는 primary ascending-ID always-admit LRU와 구분한다.
 
 ## 9.4 `k=128`
 
@@ -1023,17 +1035,17 @@ Throughput Gain
 예:
 
 ```text
-B_common = min(Bmax of compared configurations)
+B_common = min(Bmax of compared configurations) = 40
 ```
 
 이 결과는 batch 차이를 제거하고 cache/residency 자체의 효과를 보여준다.
 
 ## 17.3 Fixed-workload makespan
 
-Evaluation 2048 requests 전체를 각 configuration의 Bmax로 처리한다.
+고정된 Evaluation 1200-request prefix 전체를 각 configuration의 Bmax로 처리한다.
 
 ```text
-waves = ceil(2048 / Bmax)
+waves = ceil(1200 / Bmax)
 ```
 
 마지막 partial wave도 포함한다.
@@ -1042,7 +1054,7 @@ waves = ceil(2048 / Bmax)
 
 ```text
 steady-state full-batch throughput
-fixed 2048-request makespan
+fixed 1200-request makespan
 cold-start 포함/제외
 ```
 
@@ -1245,7 +1257,7 @@ experiments/
 ## Phase 1. Dataset
 
 - LMSYS 4K/256 calibration 256개
-- LMSYS 4K/256 evaluation 2048개
+- LMSYS 4K/256 evaluation 고정 prefix 1200개
 - exact token length 검증
 
 ## Phase 2. Trace

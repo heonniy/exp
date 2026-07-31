@@ -55,7 +55,14 @@ go under `artifacts/` or `experiments/results/`.
 .venv/bin/python -m experiments.benchmark.run_residency_sweep \
   --config experiments/configs/h100_lmsys_4k256.yaml \
   --trace artifacts/traces/evaluation_4k256.npz \
-  --calibration-trace artifacts/traces/calibration_4k256.npz
+  --calibration-trace artifacts/traces/calibration_4k256.npz \
+  --expert-bytes 9437184 \
+  --batch-size 40 --requests 1200 \
+  --permanent-method batch_step_union_presence \
+  --quota-controls ascending_always_admit resident_hit_first \
+    miss_bypass no_admission window_frequency random_order \
+  --bmax-csv experiments/results/bmax/bmax.csv \
+  --output-dir experiments/results/trace_controls_b40_n1200
 
 # Real serial Expert offload uses 58GB of host-pinned model weights.
 ./scripts/gpu0.sh .venv/bin/python -m experiments.benchmark.run_offloaded_decode \
@@ -85,6 +92,11 @@ Transformers `StaticCache`, initializes its sequence length to 4,096, and runs t
 real attention/router/Expert code for the 256 replayed tokens. Use `real_prefill`
 when prompt-dependent KV values or end-to-end timing matter.
 
+Natural routing from a `static_zero` run is not comparable with a reference trace
+collected after real prompt prefill. Routing diagnostics therefore report
+position, active-set, and order-only mismatch separately and label reference
+comparability explicitly.
+
 ## Trace collection
 
 Trace collection writes resumable part files, so an interrupted run continues from
@@ -104,6 +116,15 @@ the first missing request:
 The real Bmax probe loads the dense model and selected residency policy, reserves
 the common 2 GiB safety margin, allocates the full peak KV cache, and executes one
 forced-routing decode step. It is distinct from the synthetic allocator probe.
+
+The complete 1,200-request 4K/256 matrix, including intermediate k=48, measured
+Bmax, common physical B=40, 256-step makespan, and CUDA-event timing breakdown is
+restartable with one command:
+
+```bash
+./scripts/gpu0.sh .venv/bin/python \
+  -m experiments.benchmark.run_4k256_completion
+```
 
 ```bash
 ./scripts/gpu0.sh .venv/bin/python \
@@ -165,9 +186,8 @@ Nsight Systems capture is also constrained to GPU 0 and stored under the project
 ## Current dataset limitation
 
 The local LMSYS parquet snapshot contains 1,529 examples satisfying every strict
-4K/256 filter. The implementation therefore preserves 256 calibration and 1,273
-evaluation examples, reports a 775-example shortfall, and never duplicates or pads
-examples to manufacture the requested 2,048 evaluation rows. Exact token lengths
-and split disjointness are validated.
+4K/256 filter. The completion experiment uses a fixed 256-row calibration split
+and the first 1,200 evaluation rows as explicitly requested. It never duplicates
+or pads examples. Exact token lengths and split disjointness are validated.
 
 See `--help` on each module for smaller smoke-test sizes and dry-run sweep manifests.

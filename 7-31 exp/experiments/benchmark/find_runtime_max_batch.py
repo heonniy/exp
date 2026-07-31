@@ -56,6 +56,7 @@ def probe_candidate(
     safety_margin_bytes: int,
     token_ids: np.ndarray,
     routing: np.ndarray,
+    permanent_method: str,
 ) -> dict:
     manager = engine = cache = reserve = output = None
     _detach_engine(model)
@@ -69,6 +70,8 @@ def probe_candidate(
             num_experts,
             host_store,
             calibration,
+            permanent_method=permanent_method,
+            permanent_batch_size=batch_size,
         )
         engine = OffloadedExpertEngine(host_store, manager, prefetch_depth=1)
         attach_engine(model, engine)
@@ -145,6 +148,16 @@ def main() -> None:
     parser.add_argument("--expert-bytes", type=int, required=True)
     parser.add_argument("--dense-bytes", type=int, required=True)
     parser.add_argument("--fixed-workspace-bytes", type=int, default=0)
+    parser.add_argument(
+        "--permanent-method",
+        choices=[
+            "presence",
+            "token_frequency",
+            "batch_step_union_presence",
+            "streaming_reload",
+        ],
+        default="batch_step_union_presence",
+    )
     parser.add_argument("--max-batch", type=int)
     parser.add_argument("--max-pinned-experts", type=int, default=6144)
     parser.add_argument("--output", type=Path, required=True)
@@ -244,6 +257,7 @@ def main() -> None:
             safety_margin_bytes=accounting.safety_margin_bytes,
             token_ids=token_ids,
             routing=routing,
+            permanent_method=args.permanent_method,
         )
         probes[candidate] = result
         print(
@@ -262,6 +276,9 @@ def main() -> None:
         "config": config.name,
         "policy": args.policy,
         "k": args.k,
+        "permanent_method": (
+            args.permanent_method if args.policy == "permanent_k" else None
+        ),
         **accounting.as_dict(),
         "measured_bmax": low,
         "search_upper_batch": upper,
