@@ -251,6 +251,8 @@ def main() -> None:
     torch.cuda.empty_cache()
 
     expected = None
+    forced_routing_trace_sha256 = None
+    forced_routing_ids_sha256 = None
     if args.forced_routing_trace is not None:
         trace = RoutingTrace.load(args.forced_routing_trace)
         expected_ids = [str(value) for value in trace.conversation_ids[: args.batch_size]]
@@ -258,6 +260,10 @@ def main() -> None:
         if expected_ids != workload_ids:
             raise ValueError("forced routing trace does not match workload row order")
         expected = trace.routing_expert_ids[: args.batch_size, :steps]
+        forced_routing_trace_sha256 = trace.digest()
+        forced_routing_ids_sha256 = __import__("hashlib").sha256(
+            expected.tobytes()
+        ).hexdigest()
         engine.set_forced_routing(expected)
 
     torch.cuda.reset_peak_memory_stats()
@@ -303,6 +309,14 @@ def main() -> None:
     generated = args.batch_size * steps
     engine_metrics = engine.metrics()
     host_after = host_store.metrics()
+    final_logits_sha256 = __import__("hashlib").sha256(
+        output.logits.detach()
+        .to(device="cpu")
+        .contiguous()
+        .view(torch.uint8)
+        .numpy()
+        .tobytes()
+    ).hexdigest()
     metrics = {
         "config": config.name,
         "gpu_physical_index": 0,
@@ -357,6 +371,9 @@ def main() -> None:
         "forced_output_ids_sha256": __import__("hashlib")
         .sha256(forced_tokens.tobytes())
         .hexdigest(),
+        "forced_routing_trace_sha256": forced_routing_trace_sha256,
+        "forced_routing_ids_sha256": forced_routing_ids_sha256,
+        "final_logits_sha256": final_logits_sha256,
         **engine_metrics,
     }
     atomic_write_json(args.output, metrics)

@@ -125,6 +125,24 @@ forced-routing decode step. It is distinct from the synthetic allocator probe.
   --output-dir experiments/results/runtime_at_bmax
 ```
 
+After selecting a configuration, run every strict evaluation row in full and
+last-partial waves without reloading the model:
+
+```bash
+./scripts/gpu0.sh .venv/bin/python \
+  -m experiments.benchmark.run_fixed_workload \
+  --config experiments/configs/h100_lmsys_4k256.yaml \
+  --workload artifacts/data/lmsys_4k256_evaluation.jsonl \
+  --calibration-trace artifacts/traces/calibration_4k256.npz \
+  --forced-routing-trace artifacts/traces/evaluation_4k256.npz \
+  --policy quota_lru_k --k 8 --batch-size 178 \
+  --output experiments/results/quota_k8_fixed_workload.json
+```
+
+Quota state is warm across waves by default. Add `--cold-each-wave` for the cold
+Quota-LRU control. Replace the example batch 178 with the corresponding measured
+Bmax; each wave records its exact batch size and decode time.
+
 For the `stream1_no_prefetch` micro-ablation, run the decode command with
 `--prefetch-depth 0`; the primary curve and sweep default to depth 1.
 Add `--timeline-events` to representative runs to record CUDA-event H2D duration,

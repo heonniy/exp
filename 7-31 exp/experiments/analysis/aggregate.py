@@ -38,6 +38,9 @@ FIELDS = [
     "expert_compute_ms",
     "other_dense_host_idle_ms",
     "natural_route_mismatch_rate",
+    "forced_output_ids_sha256",
+    "forced_routing_ids_sha256",
+    "final_logits_sha256",
     "host_memory_mode",
     "source",
 ]
