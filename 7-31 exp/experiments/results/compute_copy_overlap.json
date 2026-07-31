@@ -1,0 +1,49 @@
+{
+  "dtype": "bfloat16",
+  "gpu_name": "NVIDIA H100 80GB HBM3",
+  "gpu_physical_index": 0,
+  "hidden_size": 2048,
+  "intermediate_size": 768,
+  "measurements": [
+    {
+      "compute_ms": 0.05783274956047535,
+      "concurrent_ms": 0.2339939996600151,
+      "copy_ms": 0.175245501101017,
+      "expert_bytes": 9437184,
+      "exposed_h2d_ms": 0.17616125009953976,
+      "iterations_per_repeat": 64,
+      "overlap_ratio": 0.0,
+      "tokens_per_expert": 1
+    },
+    {
+      "compute_ms": 0.06111450120806694,
+      "concurrent_ms": 0.23655349761247635,
+      "copy_ms": 0.17526724934577942,
+      "expert_bytes": 9437184,
+      "exposed_h2d_ms": 0.1754389964044094,
+      "iterations_per_repeat": 64,
+      "overlap_ratio": 0.0,
+      "tokens_per_expert": 4
+    },
+    {
+      "compute_ms": 0.06104000099003315,
+      "concurrent_ms": 0.23576875030994415,
+      "copy_ms": 0.17512574791908264,
+      "expert_bytes": 9437184,
+      "exposed_h2d_ms": 0.174728749319911,
+      "iterations_per_repeat": 64,
+      "overlap_ratio": 0.0022669344964343363,
+      "tokens_per_expert": 16
+    },
+    {
+      "compute_ms": 0.06016574986279011,
+      "concurrent_ms": 0.23595024645328522,
+      "copy_ms": 0.17485249787569046,
+      "expert_bytes": 9437184,
+      "exposed_h2d_ms": 0.1757844965904951,
+      "iterations_per_repeat": 64,
+      "overlap_ratio": 0.0,
+      "tokens_per_expert": 64
+    }
+  ]
+}

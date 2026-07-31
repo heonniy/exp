@@ -21,6 +21,7 @@ class ExpertSlot:
         tensor_shapes: Mapping[str, tuple[int, ...]],
         dtype: torch.dtype = torch.bfloat16,
         device: torch.device | str = "cuda:0",
+        host_staging: bool = False,
     ):
         self.slot_id = slot_id
         self.tensors = {
@@ -32,6 +33,10 @@ class ExpertSlot:
         self.compute_done = torch.cuda.Event(blocking=False)
         self._has_compute_event = False
         self._has_copy_event = False
+        self._copy_source: dict[str, torch.Tensor] | None = None
+        self._host_staging: dict[str, torch.Tensor] | None = None
+        if host_staging:
+            self.ensure_host_staging()
 
     @property
     def bytes(self) -> int:
@@ -47,11 +52,24 @@ class ExpertSlot:
     ) -> None:
         if set(source) != set(self.tensors):
             raise ValueError("source tensors do not match the Expert slot layout")
+        if self._has_copy_event:
+            # The pinned allocation must stay alive until its asynchronous H2D
+            # completes. Slot reuse occurs infrequently enough that this host
+            # wait is normally already satisfied by the intervening compute.
+            self.copy_done.synchronize()
+        if all(tensor.is_pinned() for tensor in source.values()):
+            copy_source = dict(source)
+        else:
+            self.ensure_host_staging()
+            copy_source = self._host_staging
+            for name, host_tensor in source.items():
+                copy_source[name].copy_(host_tensor)
+        self._copy_source = copy_source
         with torch.cuda.stream(copy_stream):
             if self._has_compute_event:
                 copy_stream.wait_event(self.compute_done)
             for name, destination in self.tensors.items():
-                host_tensor = source[name]
+                host_tensor = copy_source[name]
                 if host_tensor.device.type != "cpu":
                     raise ValueError("Expert H2D source must reside on CPU")
                 if not host_tensor.is_pinned():
@@ -72,14 +90,41 @@ class ExpertSlot:
         self.compute_done.record(compute_stream)
         self._has_compute_event = True
 
+    def release_copy_source(self) -> None:
+        if self._has_copy_event:
+            self.copy_done.synchronize()
+        self._copy_source = None
+
+    def ensure_host_staging(self) -> None:
+        if self._host_staging is None:
+            self._host_staging = {
+                name: torch.empty(
+                    tensor.shape,
+                    dtype=tensor.dtype,
+                    device="cpu",
+                    pin_memory=True,
+                )
+                for name, tensor in self.tensors.items()
+            }
+
+    def release_host_staging(self) -> None:
+        self.release_copy_source()
+        self._host_staging = None
+
 
 class ResidentExpert:
     """GPU-resident Expert weights used by permanent and quota policies."""
 
-    def __init__(self, layer_id: int, expert_id: int, tensors: Mapping[str, torch.Tensor]):
+    def __init__(
+        self,
+        layer_id: int,
+        expert_id: int,
+        tensors: Mapping[str, torch.Tensor],
+        slot: ExpertSlot | None = None,
+    ):
         if any(tensor.device.type != "cuda" for tensor in tensors.values()):
             raise ValueError("resident Expert weights must be CUDA tensors")
         self.layer_id = layer_id
         self.expert_id = expert_id
         self.tensors = dict(tensors)
-
+        self.slot = slot

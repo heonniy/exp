@@ -16,10 +16,10 @@ class TransientDoubleBuffer:
         dtype: torch.dtype = torch.bfloat16,
         device: torch.device | str = "cuda:0",
     ):
-        self.slots = (
-            ExpertSlot(0, tensor_shapes, dtype, device),
-            ExpertSlot(1, tensor_shapes, dtype, device),
-        )
+        self.slots = [
+            ExpertSlot(0, tensor_shapes, dtype, device, host_staging=True),
+            ExpertSlot(1, tensor_shapes, dtype, device, host_staging=True),
+        ]
 
     @property
     def bytes(self) -> int:
@@ -32,3 +32,9 @@ class TransientDoubleBuffer:
             return self.slots[0]
         raise ValueError("slot does not belong to this double buffer")
 
+    def replace(self, current: ExpertSlot, replacement: ExpertSlot) -> None:
+        for index, slot in enumerate(self.slots):
+            if slot is current:
+                self.slots[index] = replacement
+                return
+        raise ValueError("current slot does not belong to this double buffer")

@@ -1,7 +1,10 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import torch
 
+from experiments.trace.collect_forced_routing_trace import _router_topk
 from experiments.runtime.policies import (
     FullResidentPolicy,
     PermanentPolicy,
@@ -59,3 +62,15 @@ def test_permanent_selection_and_full_resident() -> None:
     assert full.fetches == 0
     assert full.hit_rate == 1.0
 
+
+def test_batched_router_logits_keep_requests_separate() -> None:
+    outputs = SimpleNamespace(
+        router_logits=(
+            torch.tensor([[0.0, 3.0, 2.0], [5.0, 0.0, 4.0]]),
+            torch.tensor([[7.0, 1.0, 6.0], [0.0, 9.0, 8.0]]),
+        )
+    )
+    routes = _router_topk(outputs, expected_layers=2, top_k=2, batch_size=2)
+    assert routes.shape == (2, 2, 2)
+    assert routes[0].tolist() == [[1, 2], [0, 2]]
+    assert routes[1].tolist() == [[0, 2], [1, 2]]

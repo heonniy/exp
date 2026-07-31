@@ -56,7 +56,15 @@ go under `artifacts/` or `experiments/results/`.
   --config experiments/configs/h100_lmsys_4k256.yaml \
   --trace artifacts/traces/evaluation_4k256.npz \
   --calibration-trace artifacts/traces/calibration_4k256.npz
+
+# Real serial Expert offload uses 58GB of host-pinned model weights.
+./scripts/gpu0.sh .venv/bin/python -m experiments.benchmark.run_offloaded_decode \
+  --config experiments/configs/h100_lmsys_4k256.yaml \
+  --workload artifacts/data/lmsys_4k256_evaluation.jsonl \
+  --policy stream2 --k 0 --batch-size 1 \
+  --host-memory-mode pinned_weights --max-pinned-experts 6144 \
+  --forced-routing-trace artifacts/traces/evaluation_4k256.npz \
+  --output experiments/results/stream2_b1.json
 ```
 
 See `--help` on each module for smaller smoke-test sizes.
-

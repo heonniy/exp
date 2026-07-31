@@ -49,7 +49,9 @@ def _save_part(
         raise
 
 
-def _router_topk(outputs, expected_layers: int, top_k: int) -> np.ndarray:
+def _router_topk(
+    outputs, expected_layers: int, top_k: int, batch_size: int
+) -> np.ndarray:
     router_logits = outputs.router_logits
     if router_logits is None or len(router_logits) != expected_layers:
         raise RuntimeError(
@@ -58,49 +60,66 @@ def _router_topk(outputs, expected_layers: int, top_k: int) -> np.ndarray:
         )
     layer_routes = []
     for logits in router_logits:
-        final_position = logits.reshape(-1, logits.shape[-1])[-1]
+        final_position = logits.reshape(batch_size, -1, logits.shape[-1])[:, -1, :]
         expert_ids = torch.topk(final_position, k=top_k, dim=-1).indices
         layer_routes.append(expert_ids.to(dtype=torch.uint8, device="cpu").numpy())
-    return np.stack(layer_routes)
+    return np.stack(layer_routes, axis=1)
 
 
 @torch.inference_mode()
-def collect_one(model, example: dict, config: ExperimentConfig) -> tuple[np.ndarray, np.ndarray]:
+def collect_batch(
+    model, examples: list[dict], config: ExperimentConfig
+) -> tuple[np.ndarray, np.ndarray]:
     device = torch.device("cuda:0")
-    prompt = torch.tensor(example["input_ids"], dtype=torch.long, device=device)[None]
-    forced = np.asarray(example["forced_output_ids"], dtype=np.int32)
+    prompt = torch.tensor(
+        [example["input_ids"] for example in examples],
+        dtype=torch.long,
+        device=device,
+    )
+    forced = np.asarray(
+        [example["forced_output_ids"] for example in examples], dtype=np.int32
+    )
     if prompt.shape[1] != config.dataset.input_tokens:
         raise ValueError("input does not have the configured fixed length")
-    if len(forced) != config.dataset.output_tokens:
+    if forced.shape[1] != config.dataset.output_tokens:
         raise ValueError("forced output does not have the configured fixed length")
+    batch_size = len(examples)
 
     prefill = model(
         input_ids=prompt,
         use_cache=True,
         output_router_logits=False,
+        logits_to_keep=1,
         return_dict=True,
     )
     past = prefill.past_key_values
     routes = np.empty(
         (
+            batch_size,
             config.dataset.output_tokens,
             config.model.num_moe_layers,
             config.model.router_top_k,
         ),
         dtype=np.uint8,
     )
-    for step, token_id in enumerate(forced):
-        token = torch.tensor([[int(token_id)]], dtype=torch.long, device=device)
+    for step in range(config.dataset.output_tokens):
+        token = torch.as_tensor(
+            forced[:, step, None], dtype=torch.long, device=device
+        )
         output = model(
             input_ids=token,
             past_key_values=past,
             use_cache=True,
             output_router_logits=True,
+            logits_to_keep=1,
             return_dict=True,
         )
         past = output.past_key_values
-        routes[step] = _router_topk(
-            output, config.model.num_moe_layers, config.model.router_top_k
+        routes[:, step] = _router_topk(
+            output,
+            config.model.num_moe_layers,
+            config.model.router_top_k,
+            batch_size,
         )
     return forced, routes
 
@@ -131,6 +150,12 @@ def main() -> None:
         "--limit", type=int, help="Collect only the first N requests for a smoke test."
     )
     parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Requests traced together; reduce if full-resident tracing OOMs.",
+    )
+    parser.add_argument(
         "--finalize-only",
         action="store_true",
         help="Build the final NPZ from already collected part files.",
@@ -145,16 +170,33 @@ def main() -> None:
         examples = examples[: args.limit]
     if not examples:
         raise ValueError("input split is empty")
+    if args.batch_size <= 0:
+        raise ValueError("--batch-size must be positive")
 
     if not args.finalize_only:
         model = load_model(config)
-        for index, example in enumerate(examples):
-            part = parts_dir / f"{index:06d}.npz"
-            if part.exists():
-                continue
-            forced, routes = collect_one(model, example, config)
-            _save_part(part, str(example["conversation_id"]), forced, routes)
-            print(f"collected {index + 1}/{len(examples)}", flush=True)
+        missing_indices = [
+            index
+            for index in range(len(examples))
+            if not (parts_dir / f"{index:06d}.npz").exists()
+        ]
+        for offset in range(0, len(missing_indices), args.batch_size):
+            indices = missing_indices[offset : offset + args.batch_size]
+            batch = [examples[index] for index in indices]
+            forced, routes = collect_batch(model, batch, config)
+            for batch_index, example_index in enumerate(indices):
+                example = examples[example_index]
+                _save_part(
+                    parts_dir / f"{example_index:06d}.npz",
+                    str(example["conversation_id"]),
+                    forced[batch_index],
+                    routes[batch_index],
+                )
+            print(
+                f"collected {min(offset + len(indices), len(missing_indices))}/"
+                f"{len(missing_indices)} missing requests",
+                flush=True,
+            )
 
     expected_parts = [parts_dir / f"{index:06d}.npz" for index in range(len(examples))]
     missing = [str(part) for part in expected_parts if not part.exists()]
@@ -176,4 +218,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
