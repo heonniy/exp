@@ -6,6 +6,21 @@ from typing import Mapping
 import torch
 
 
+def contiguous_projection_views(
+    buffer: torch.Tensor,
+    tensor_shapes: Mapping[str, tuple[int, ...]],
+) -> dict[str, torch.Tensor]:
+    views = {}
+    offset = 0
+    for name, shape in tensor_shapes.items():
+        elements = int(torch.Size(shape).numel())
+        views[name] = buffer[offset : offset + elements].view(shape)
+        offset += elements
+    if offset != buffer.numel():
+        raise ValueError("projection shapes do not cover the Expert buffer")
+    return views
+
+
 @dataclass
 class SlotIdentity:
     layer_id: int | None = None
@@ -24,47 +39,70 @@ class ExpertSlot:
         host_staging: bool = False,
     ):
         self.slot_id = slot_id
-        self.tensors = {
-            name: torch.empty(shape, dtype=dtype, device=device)
-            for name, shape in tensor_shapes.items()
-        }
+        self.tensor_shapes = dict(tensor_shapes)
+        total_elements = sum(
+            int(torch.Size(shape).numel()) for shape in self.tensor_shapes.values()
+        )
+        self.buffer = torch.empty(
+            total_elements, dtype=dtype, device=device
+        )
+        self.tensors = self._views(self.buffer)
         self.identity = SlotIdentity()
         self.copy_done = torch.cuda.Event(blocking=False)
         self.compute_done = torch.cuda.Event(blocking=False)
         self._has_compute_event = False
         self._has_copy_event = False
-        self._copy_source: dict[str, torch.Tensor] | None = None
-        self._host_staging: dict[str, torch.Tensor] | None = None
+        self._copy_source: torch.Tensor | None = None
+        self._host_staging: torch.Tensor | None = None
+        self._host_staging_views: dict[str, torch.Tensor] | None = None
         if host_staging:
             self.ensure_host_staging()
 
     @property
     def bytes(self) -> int:
-        return sum(tensor.numel() * tensor.element_size() for tensor in self.tensors.values())
+        return self.buffer.numel() * self.buffer.element_size()
+
+    def _views(self, buffer: torch.Tensor) -> dict[str, torch.Tensor]:
+        return contiguous_projection_views(buffer, self.tensor_shapes)
 
     def enqueue_copy(
         self,
         *,
         layer_id: int,
         expert_id: int,
-        source: Mapping[str, torch.Tensor],
+        source: Mapping[str, torch.Tensor] | torch.Tensor,
         copy_stream: torch.cuda.Stream,
         record_timing: bool = False,
     ) -> tuple[torch.cuda.Event, torch.cuda.Event] | None:
-        if set(source) != set(self.tensors):
-            raise ValueError("source tensors do not match the Expert slot layout")
         if self._has_copy_event:
             # The pinned allocation must stay alive until its asynchronous H2D
             # completes. Slot reuse occurs infrequently enough that this host
             # wait is normally already satisfied by the intervening compute.
             self.copy_done.synchronize()
-        if all(tensor.is_pinned() for tensor in source.values()):
-            copy_source = dict(source)
+        if isinstance(source, torch.Tensor):
+            copy_source = source
+            if source.device.type != "cpu":
+                raise ValueError("Expert H2D source must reside on CPU")
+            if not source.is_pinned():
+                raise ValueError("Expert H2D source must use pinned memory")
+            if source.dtype != self.buffer.dtype:
+                raise ValueError("Expert H2D source dtype does not match slot")
+            if source.numel() != self.buffer.numel() or not source.is_contiguous():
+                raise ValueError(
+                    "Expert H2D source must be one contiguous flat Expert buffer"
+                )
         else:
+            if set(source) != set(self.tensors):
+                raise ValueError("source tensors do not match the Expert slot layout")
             self.ensure_host_staging()
             copy_source = self._host_staging
+            assert copy_source is not None
+            assert self._host_staging_views is not None
             for name, host_tensor in source.items():
-                copy_source[name].copy_(host_tensor)
+                destination = self._host_staging_views[name]
+                if tuple(host_tensor.shape) != tuple(destination.shape):
+                    raise ValueError(f"shape mismatch for {name}")
+                destination.copy_(host_tensor)
         self._copy_source = copy_source
         copy_started = (
             torch.cuda.Event(enable_timing=True) if record_timing else None
@@ -76,15 +114,10 @@ class ExpertSlot:
                 copy_stream.wait_event(self.compute_done)
             if copy_started is not None:
                 copy_started.record(copy_stream)
-            for name, destination in self.tensors.items():
-                host_tensor = copy_source[name]
-                if host_tensor.device.type != "cpu":
-                    raise ValueError("Expert H2D source must reside on CPU")
-                if not host_tensor.is_pinned():
-                    raise ValueError("Expert H2D source must use pinned memory")
-                if tuple(host_tensor.shape) != tuple(destination.shape):
-                    raise ValueError(f"shape mismatch for {name}")
-                destination.copy_(host_tensor, non_blocking=True)
+            # Exactly one H2D operation per Expert fetch. gate/up/down are views
+            # over this contiguous destination buffer and are never copied
+            # separately.
+            self.buffer.copy_(copy_source, non_blocking=True)
             self.copy_done.record(copy_stream)
         self.identity = SlotIdentity(layer_id=layer_id, expert_id=expert_id)
         self._has_copy_event = True
@@ -108,19 +141,18 @@ class ExpertSlot:
 
     def ensure_host_staging(self) -> None:
         if self._host_staging is None:
-            self._host_staging = {
-                name: torch.empty(
-                    tensor.shape,
-                    dtype=tensor.dtype,
-                    device="cpu",
-                    pin_memory=True,
-                )
-                for name, tensor in self.tensors.items()
-            }
+            self._host_staging = torch.empty(
+                self.buffer.numel(),
+                dtype=self.buffer.dtype,
+                device="cpu",
+                pin_memory=True,
+            )
+            self._host_staging_views = self._views(self._host_staging)
 
     def release_host_staging(self) -> None:
         self.release_copy_source()
         self._host_staging = None
+        self._host_staging_views = None
 
 
 class ResidentExpert:

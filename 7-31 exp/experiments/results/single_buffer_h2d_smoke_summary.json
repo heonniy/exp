@@ -1,0 +1,18 @@
+{
+  "config": "h100_lmsys_4k256",
+  "gpu_physical_index": 0,
+  "policy": "stream2",
+  "batch_size": 1,
+  "decode_steps": 1,
+  "host_memory_mode": "two_slot_pinned_staging",
+  "expert_bytes": 9437184,
+  "expert_h2d_fetches": 384,
+  "expert_h2d_copy_operations": 384,
+  "h2d_copy_operations_per_fetch": 1,
+  "gpu_expert_layout": "single_contiguous_buffer_with_projection_views",
+  "host_expert_layout": "projection_tensors_packed_into_single_slot_staging",
+  "expert_h2d_bytes": 3623878656,
+  "final_logits_sha256": "cc101da1e5b190768df8a9524554f77c9a9a0879e3717ea271c078331dd1fafe",
+  "matches_pre_change_static_zero_logits_sha256": true,
+  "interpretation": "Each Expert fetch enqueues one contiguous 9 MiB H2D copy. gate_proj, up_proj, and down_proj are zero-copy views over the GPU buffer."
+}

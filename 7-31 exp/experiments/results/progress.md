@@ -4,6 +4,11 @@
 > The corrected official comparison uses a 1,200-request prefix, batch-step union
 > Permanent scoring, Quota sensitivity controls, and physical common B=40. Read
 > `FEEDBACK_RESPONSE.md` and `completion_4k256_1200/` first.
+>
+> The executor measurements in this historical file used three projection-level
+> H2D enqueues per Expert. They are superseded by the single-contiguous-buffer
+> implementation. Do not use the old runtime timing/overlap values in the final
+> decision; the completion run remeasures them.
 
 All GPU measurements in this directory used physical GPU 0 through
 `scripts/gpu0.sh`.

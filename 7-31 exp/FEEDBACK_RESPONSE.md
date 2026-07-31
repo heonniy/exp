@@ -92,3 +92,18 @@ Run it with:
 
 Each atomic JSON output is a restart checkpoint. Existing completed outputs are
 skipped on rerun.
+
+## 5. Single-buffer Expert H2D correction
+
+The original executor allocated three GPU tensors and enqueued separate
+gate/up/down H2D copies, while the pure bandwidth benchmark copied one contiguous
+9 MiB buffer. That made the benchmark and runtime transfer granularity differ.
+
+The host-pinned cache and every GPU Expert slot now use one contiguous 9,437,184
+byte buffer. gate/up/down are views used only by GEMM; one Expert fetch enqueues
+exactly one H2D `copy_`. A GPU-0 smoke recorded 384 Expert fetches and 384 H2D copy
+operations, with the same final-logits digest as the pre-change execution.
+
+All pre-change executor timing/overlap measurements are superseded. Cache trace
+counts and HBM byte accounting remain structurally useful, but runtime timing is
+remeasured by the completion run.

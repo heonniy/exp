@@ -111,6 +111,12 @@ def probe_candidate(
             "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
             "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
             "expert_h2d_fetches": metrics["expert_h2d_fetches"],
+            "expert_h2d_copy_operations": metrics[
+                "expert_h2d_copy_operations"
+            ],
+            "h2d_copy_operations_per_fetch": metrics[
+                "h2d_copy_operations_per_fetch"
+            ],
             "forced_routing": metrics["forced_routing"],
         }
     except torch.OutOfMemoryError as error:

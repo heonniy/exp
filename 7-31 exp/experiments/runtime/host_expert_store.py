@@ -12,8 +12,22 @@ from safetensors import safe_open
 PROJECTIONS = ("gate_proj", "up_proj", "down_proj")
 
 
+def pack_projection_tensors(
+    tensors: dict[str, torch.Tensor], *, pin_memory: bool
+) -> torch.Tensor:
+    if set(tensors) != set(PROJECTIONS):
+        raise ValueError("Expert projection set is incomplete")
+    dtypes = {tensor.dtype for tensor in tensors.values()}
+    if len(dtypes) != 1:
+        raise ValueError("Expert projections must have a common dtype")
+    packed = torch.cat(
+        [tensors[projection].reshape(-1) for projection in PROJECTIONS]
+    )
+    return packed.pin_memory() if pin_memory else packed
+
+
 class PinnedExpertStore:
-    """Lazy safetensors-backed CPU Expert store with bounded tensor-view LRU.
+    """Lazy safetensors-backed CPU Expert store with a bounded Expert LRU.
 
     Fixed pinned staging buffers belong to the two transient GPU slots. This
     store retains cheap CPU/mmap tensor views and never pins an Expert per miss.
@@ -33,7 +47,9 @@ class PinnedExpertStore:
         ) as handle:
             self.weight_map: dict[str, str] = json.load(handle)["weight_map"]
         self._archives = {}
-        self._cache: OrderedDict[tuple[int, int], dict[str, torch.Tensor]] = (
+        self._cache: OrderedDict[
+            tuple[int, int], dict[str, torch.Tensor] | torch.Tensor
+        ] = (
             OrderedDict()
         )
         self.max_pinned_experts = max_pinned_experts
@@ -58,7 +74,9 @@ class PinnedExpertStore:
             f"{projection}.weight"
         )
 
-    def get(self, layer_id: int, expert_id: int) -> dict[str, torch.Tensor]:
+    def get(
+        self, layer_id: int, expert_id: int
+    ) -> dict[str, torch.Tensor] | torch.Tensor:
         self.stage_calls += 1
         key = (layer_id, expert_id)
         cached = self._cache.pop(key, None)
@@ -77,11 +95,18 @@ class PinnedExpertStore:
                 raise KeyError(f"checkpoint is missing {name}") from error
             tensor = self._archive(shard).get_tensor(name)
             tensors[projection] = tensor.pin_memory() if self.pin_weights else tensor
+        value: dict[str, torch.Tensor] | torch.Tensor
+        if self.pin_weights:
+            # One pinned contiguous Expert allocation. The GPU slot has the same
+            # projection order, so fetch performs one 9 MiB H2D operation.
+            value = pack_projection_tensors(tensors, pin_memory=True)
+        else:
+            value = tensors
         self.stage_seconds += time.perf_counter() - started
-        self._cache[key] = tensors
+        self._cache[key] = value
         while len(self._cache) > self.max_pinned_experts:
             self._cache.popitem(last=False)
-        return tensors
+        return value
 
     def preload_all(self, num_layers: int, num_experts: int) -> float:
         required = num_layers * num_experts
@@ -113,5 +138,10 @@ class PinnedExpertStore:
             "current_pinned_experts": len(self._cache),
             "host_memory_mode": (
                 "pinned_weights" if self.pin_weights else "two_slot_pinned_staging"
+            ),
+            "host_expert_layout": (
+                "single_contiguous_pinned_tensor"
+                if self.pin_weights
+                else "projection_tensors_packed_into_single_slot_staging"
             ),
         }

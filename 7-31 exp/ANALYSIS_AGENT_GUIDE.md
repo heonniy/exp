@@ -26,23 +26,25 @@ The implementation target and invariant definitions are in
    - Physical common-batch runtime; B=40 is no larger than full-resident Bmax 41.
 6. `experiments/results/natural_routing_diagnostic_summary.json`
    - Same-prompt real-prefill and non-comparable static-zero mismatch breakdown.
-7. `experiments/results/progress.md`
+7. `experiments/results/single_buffer_h2d_smoke_summary.json`
+   - Verifies one contiguous H2D operation per Expert fetch and unchanged logits.
+8. `experiments/results/progress.md`
    - Historical status and the earlier 1,273-request/B=50 cache sweep.
-8. `experiments/results/bmax/bmax.csv`
+9. `experiments/results/bmax/bmax.csv`
    - Earlier real-runtime HBM endpoints.
-9. `experiments/results/trace_sweep_b50/cache_summary.csv`
+10. `experiments/results/trace_sweep_b50/cache_summary.csv`
    - Historical 1,273-request cache simulation at fixed batch 50. The
      full-resident row is a cache upper bound, not a physical runtime point.
-10. `experiments/results/trace_sweep_b50/per_layer.csv`
+11. `experiments/results/trace_sweep_b50/per_layer.csv`
     - Layer-level hits, refetches, evictions, and traffic reduction.
-11. `experiments/results/trace_sweep_b50/trace_diagnostics.png`
+12. `experiments/results/trace_sweep_b50/trace_diagnostics.png`
     - Visual summary of hit rate, H2D traffic, refetches, and layer variation.
-12. `experiments/results/offloaded_smoke_summary.csv`
-    - Real pinned-weight integration smokes only.
-13. `experiments/results/offloaded_stream1_static_timeline_smoke.json` and
+13. `experiments/results/offloaded_smoke_summary.csv`
+    - Superseded three-copy integration smokes; do not use their timing.
+14. `experiments/results/offloaded_stream1_static_timeline_smoke.json` and
     `experiments/results/offloaded_stream2_static_timeline_smoke.json`
     - One-slot no-prefetch versus two-slot one-ahead validation.
-14. `experiments/results/environment.json`, `expert_bytes.json`,
+15. `experiments/results/environment.json`, `expert_bytes.json`,
     `h2d_bandwidth.json`, `compute_copy_overlap.json`, and
     `memory_breakdown.csv`
     - Hardware, checkpoint, transfer, overlap, and accounting inputs.

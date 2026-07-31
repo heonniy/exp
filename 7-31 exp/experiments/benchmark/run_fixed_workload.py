@@ -32,6 +32,7 @@ from experiments.trace.trace_schema import RoutingTrace
 SUM_METRICS = (
     "expert_h2d_fetches",
     "expert_h2d_bytes",
+    "expert_h2d_copy_operations",
     "expert_executions",
     "permanent_hits",
     "quota_hits",
