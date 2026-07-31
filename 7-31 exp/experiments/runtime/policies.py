@@ -66,8 +66,12 @@ class PermanentPolicy(ExpertPolicy):
         num_experts: int,
         k: int,
         permanent_experts: Iterable[Iterable[int]],
+        name: str = "permanent_k",
     ):
         super().__init__(num_layers, num_experts, k)
+        if name not in {"permanent_k", "permanent_oracle"}:
+            raise ValueError(f"invalid permanent policy name: {name}")
+        self.name = name
         layers = tuple(frozenset(int(expert) for expert in values) for values in permanent_experts)
         if len(layers) != num_layers:
             raise ValueError("permanent selections must cover every layer")
@@ -143,4 +147,3 @@ class FullResidentPolicy(ExpertPolicy):
 
     def resident_counts(self) -> tuple[int, ...]:
         return (self.num_experts,) * self.num_layers
-

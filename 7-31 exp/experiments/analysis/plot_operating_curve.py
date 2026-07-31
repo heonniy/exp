@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 COLORS = {
     "stream2": "#64748b",
     "permanent_k": "#2563eb",
+    "permanent_oracle": "#7c3aed",
     "quota_lru_k": "#d97706",
     "full_resident": "#334155",
 }

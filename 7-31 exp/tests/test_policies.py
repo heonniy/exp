@@ -24,6 +24,13 @@ def test_permanent_never_admits_a_miss() -> None:
     assert policy.resident_counts() == (1, 1)
 
 
+def test_oracle_permanent_policy_has_distinct_label() -> None:
+    policy = PermanentPolicy(
+        1, 4, 1, [[1]], name="permanent_oracle"
+    )
+    assert policy.name == "permanent_oracle"
+
+
 def test_quota_lru_is_strictly_layer_local() -> None:
     policy = QuotaLRUPolicy(2, 8, 2)
     assert policy.access(0, 1, 0).admitted

@@ -69,9 +69,25 @@ def run_sweep(
         else:
             policies = []
             if "permanent_k" in policy_names:
-                selected = select_topk(calibration, k, permanent_method)
+                selection_trace = (
+                    evaluation if permanent_method == "oracle" else calibration
+                )
+                selection_method = (
+                    "presence" if permanent_method == "oracle" else permanent_method
+                )
+                selected = select_topk(selection_trace, k, selection_method)
                 policies.append(
-                    PermanentPolicy(num_layers, num_experts, k, selected.tolist())
+                    PermanentPolicy(
+                        num_layers,
+                        num_experts,
+                        k,
+                        selected.tolist(),
+                        name=(
+                            "permanent_oracle"
+                            if permanent_method == "oracle"
+                            else "permanent_k"
+                        ),
+                    )
                 )
             if "quota_lru_k" in policy_names:
                 policies.append(QuotaLRUPolicy(num_layers, num_experts, k))
@@ -103,8 +119,9 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument(
         "--permanent-method",
-        choices=["presence", "token_frequency", "streaming_reload"],
+        choices=["presence", "token_frequency", "streaming_reload", "oracle"],
         default="presence",
+        help="oracle selects from evaluation and is a non-deployable upper bound",
     )
     parser.add_argument(
         "--cold-each-wave",
