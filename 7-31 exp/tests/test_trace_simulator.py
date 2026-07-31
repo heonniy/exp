@@ -28,6 +28,7 @@ def synthetic_trace() -> RoutingTrace:
         forced_output_ids=np.asarray([[10, 11], [12, 13]], dtype=np.int32),
         routing_expert_ids=routing,
         metadata={"num_experts": 4},
+        routing_expert_weights=np.full(routing.shape, 0.5, dtype=np.float32),
     )
 
 
@@ -38,6 +39,9 @@ def test_trace_round_trip(tmp_path: Path) -> None:
     loaded = RoutingTrace.load(path)
     assert loaded.digest() == trace.digest()
     np.testing.assert_array_equal(loaded.routing_expert_ids, trace.routing_expert_ids)
+    np.testing.assert_array_equal(
+        loaded.routing_expert_weights, trace.routing_expert_weights
+    )
 
 
 def test_trace_request_prefix_has_derived_identity() -> None:
@@ -55,6 +59,18 @@ def test_stream2_refetch_accounting() -> None:
     assert result.compulsory_loads == 3
     assert result.refetches == 1
     assert result.h2d_bytes == 400
+
+
+def test_request_order_seed_is_recorded_and_deterministic() -> None:
+    trace = synthetic_trace()
+    first = simulate(
+        trace, Stream2Policy(1, 4), 100, batch_size=1, request_order_seed=731
+    )
+    second = simulate(
+        trace, Stream2Policy(1, 4), 100, batch_size=1, request_order_seed=731
+    )
+    assert first.request_order_seed == 731
+    assert first.as_dict() == second.as_dict()
 
 
 def test_permanent_selection_and_full_resident() -> None:
@@ -103,7 +119,32 @@ def test_batched_router_logits_keep_requests_separate() -> None:
             torch.tensor([[7.0, 1.0, 6.0], [0.0, 9.0, 8.0]]),
         )
     )
-    routes = _router_topk(outputs, expected_layers=2, top_k=2, batch_size=2)
+    routes, weights = _router_topk(
+        outputs, expected_layers=2, top_k=2, batch_size=2
+    )
     assert routes.shape == (2, 2, 2)
     assert routes[0].tolist() == [[1, 2], [0, 2]]
     assert routes[1].tolist() == [[0, 2], [1, 2]]
+    np.testing.assert_allclose(weights.sum(axis=-1), 1.0, atol=1e-6)
+
+
+def test_legacy_trace_is_readable_but_rejected_for_weighted_replay(
+    tmp_path: Path,
+) -> None:
+    trace = synthetic_trace()
+    legacy = RoutingTrace(
+        conversation_ids=trace.conversation_ids,
+        forced_output_ids=trace.forced_output_ids,
+        routing_expert_ids=trace.routing_expert_ids,
+        metadata=trace.metadata,
+    )
+    path = tmp_path / "legacy.npz"
+    legacy.save(path)
+    loaded = RoutingTrace.load(path)
+    assert not loaded.has_routing_weights
+    try:
+        loaded.validate(4, require_weights=True)
+    except ValueError as error:
+        assert "legacy ID-only" in str(error)
+    else:
+        raise AssertionError("legacy trace unexpectedly passed weighted validation")

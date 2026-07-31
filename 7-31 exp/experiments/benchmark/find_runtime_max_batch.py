@@ -66,6 +66,7 @@ def probe_candidate(
     safety_margin_bytes: int,
     token_ids: np.ndarray,
     routing: np.ndarray,
+    routing_weights: np.ndarray,
     permanent_method: str,
 ) -> dict:
     manager = engine = cache = reserve = output = None
@@ -95,7 +96,10 @@ def probe_candidate(
         )
         reserve.zero_()
         cache = _make_peak_cache(model, batch_size, peak_sequence_length)
-        engine.set_forced_routing(routing[:batch_size, None, :, :])
+        engine.set_forced_routing(
+            routing[:batch_size, None, :, :],
+            routing_weights[:batch_size, None, :, :],
+        )
         engine.decode_step = 0
         input_ids = torch.as_tensor(
             token_ids[:batch_size, None], dtype=torch.long, device="cuda:0"
@@ -223,6 +227,7 @@ def main() -> None:
 
     examples = _read_examples(args.workload, upper)
     trace = RoutingTrace.load(args.forced_routing_trace)
+    trace.validate(config.model.num_experts_per_layer, require_weights=True)
     workload_ids = [str(row["conversation_id"]) for row in examples]
     trace_ids = [str(value) for value in trace.conversation_ids[:upper]]
     if workload_ids != trace_ids:
@@ -239,6 +244,7 @@ def main() -> None:
         [row["forced_output_ids"][0] for row in examples], dtype=np.int64
     )
     routing = trace.routing_expert_ids[:upper, 0]
+    routing_weights = trace.require_routing_weights()[:upper, 0]
     calibration = (
         RoutingTrace.load(args.calibration_trace)
         if args.calibration_trace is not None
@@ -279,6 +285,7 @@ def main() -> None:
             safety_margin_bytes=accounting.safety_margin_bytes,
             token_ids=token_ids,
             routing=routing,
+            routing_weights=routing_weights,
             permanent_method=args.permanent_method,
         )
         probes[candidate] = result

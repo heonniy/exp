@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import statistics
 import time
 from math import ceil
 from pathlib import Path
@@ -121,6 +122,7 @@ def main() -> None:
     config = load_config(args.config)
     require_gpu0(torch)
     trace = RoutingTrace.load(args.forced_routing_trace)
+    trace.validate(config.model.num_experts_per_layer, require_weights=True)
     requests = args.requests or trace.num_requests
     if not 0 < requests <= trace.num_requests:
         raise ValueError("requests is outside the forced trace")
@@ -224,7 +226,8 @@ def main() -> None:
             dtype=np.int64,
         )
         forced_routing = trace.routing_expert_ids[start:stop, :steps]
-        engine.set_forced_routing(forced_routing)
+        forced_weights = trace.require_routing_weights()[start:stop, :steps]
+        engine.set_forced_routing(forced_routing, forced_weights)
         before = engine.metrics()
         attention_timer = router_timer = None
         if args.timeline_events:
@@ -253,6 +256,12 @@ def main() -> None:
                     return_dict=True,
                 )
                 past = output.past_key_values
+                if (step + 1) % 32 == 0 or step + 1 == steps:
+                    print(
+                        f"wave {wave_index + 1}/{ceil(requests / args.batch_size)} "
+                        f"step {step + 1}/{steps}",
+                        flush=True,
+                    )
         torch.cuda.synchronize()
         elapsed = time.perf_counter() - started
         after = engine.metrics()
@@ -355,6 +364,9 @@ def main() -> None:
                     else 0.0
                 ),
                 "final_logits_sha256": digest,
+                "measurement_phase": (
+                    "warmup" if wave_index == 0 else "steady_state"
+                ),
             }
         )
         del output, past
@@ -368,6 +380,12 @@ def main() -> None:
     decode_makespan = sum(wave["decode_wall_seconds"] for wave in waves)
     generated = requests * steps
     natural_assignments = totals["natural_route_assignments"]
+    warmup_full_wave_count = 1 if full_wave_seconds else 0
+    steady_full_wave_seconds = full_wave_seconds[warmup_full_wave_count:]
+    if not args.timeline_events and len(steady_full_wave_seconds) < 5:
+        raise RuntimeError(
+            "performance protocol requires at least five full steady-state waves"
+        )
     result = {
         "config": config.name,
         "gpu_physical_index": 0,
@@ -390,9 +408,38 @@ def main() -> None:
         "fixed_workload_decode_makespan_seconds": decode_makespan,
         "fixed_workload_tokens_per_second": generated / decode_makespan,
         "steady_full_batch_tokens_per_second": (
+            len(steady_full_wave_seconds) * args.batch_size * steps
+            / sum(steady_full_wave_seconds)
+            if steady_full_wave_seconds
+            else None
+        ),
+        "all_full_batch_tokens_per_second_including_warmup": (
             len(full_wave_seconds) * args.batch_size * steps / sum(full_wave_seconds)
             if full_wave_seconds
             else None
+        ),
+        "warmup_full_wave_count": warmup_full_wave_count,
+        "warmup_full_wave_seconds": (
+            full_wave_seconds[0] if warmup_full_wave_count else None
+        ),
+        "steady_state_full_wave_repeats": len(steady_full_wave_seconds),
+        "steady_state_full_wave_seconds_median": (
+            statistics.median(steady_full_wave_seconds)
+            if steady_full_wave_seconds
+            else None
+        ),
+        "steady_state_full_wave_seconds_variance": (
+            statistics.variance(steady_full_wave_seconds)
+            if len(steady_full_wave_seconds) > 1
+            else 0.0 if steady_full_wave_seconds else None
+        ),
+        "steady_state_full_wave_seconds_standard_deviation": (
+            statistics.stdev(steady_full_wave_seconds)
+            if len(steady_full_wave_seconds) > 1
+            else 0.0 if steady_full_wave_seconds else None
+        ),
+        "performance_warmup_and_repeat_protocol_valid": (
+            len(steady_full_wave_seconds) >= 5 if not args.timeline_events else None
         ),
         "cold_start_seconds": (
             host_preload_seconds + model_load_seconds + policy_initialization_seconds
@@ -437,14 +484,21 @@ def main() -> None:
             if totals["natural_route_rows"]
             else 0.0
         ),
-        "forced_routing_weight_source": "natural_router_weights",
-        "forced_routing_weight_alignment_caveat": (
-            totals["natural_route_mismatches"] > 0
-        ),
+        "forced_routing_weight_source": "recorded_trace_weights",
+        "forced_routing_weight_alignment_caveat": False,
         "natural_route_mismatch_by_step_layer": [
             routing_mismatch_totals[key] for key in sorted(routing_mismatch_totals)
         ],
         "timeline_events_enabled": args.timeline_events,
+        "eligible_for_throughput_and_makespan_comparison": (
+            not args.timeline_events
+        ),
+        "instrumented_profile_only": args.timeline_events,
+        "timing_interpretation": (
+            "intrusive_component_profile_not_performance_evidence"
+            if args.timeline_events
+            else "uninstrumented_performance_run"
+        ),
         **{
             name: value if args.timeline_events else None
             for name, value in timing_totals.items()
@@ -458,7 +512,23 @@ def main() -> None:
         "wave_results": waves,
     }
     atomic_write_json(args.output, result)
-    print(json.dumps(result, indent=2))
+    print(
+        json.dumps(
+            {
+                "output": str(args.output),
+                "policy": args.policy,
+                "k": args.k,
+                "batch_size": args.batch_size,
+                "requests": requests,
+                "decode_steps": steps,
+                "fixed_workload_decode_makespan_seconds": decode_makespan,
+                "fixed_workload_tokens_per_second": generated / decode_makespan,
+                "expert_h2d_fetches": totals["expert_h2d_fetches"],
+                "timeline_events_enabled": args.timeline_events,
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

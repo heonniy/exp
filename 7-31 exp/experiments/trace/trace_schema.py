@@ -10,8 +10,10 @@ from typing import Any
 
 import numpy as np
 
+from experiments.common.io import provenance
 
-TRACE_SCHEMA_VERSION = 1
+
+TRACE_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,7 @@ class RoutingTrace:
     forced_output_ids: np.ndarray
     routing_expert_ids: np.ndarray
     metadata: dict[str, Any]
+    routing_expert_weights: np.ndarray | None = None
 
     @property
     def num_requests(self) -> int:
@@ -37,7 +40,19 @@ class RoutingTrace:
     def top_k(self) -> int:
         return int(self.routing_expert_ids.shape[3])
 
-    def validate(self, num_experts: int = 128) -> None:
+    @property
+    def has_routing_weights(self) -> bool:
+        return self.routing_expert_weights is not None
+
+    def require_routing_weights(self) -> np.ndarray:
+        if self.routing_expert_weights is None:
+            raise ValueError(
+                "routing trace is legacy ID-only data; collect schema-v2 "
+                "routing_expert_weights before running numerical or runtime experiments"
+            )
+        return self.routing_expert_weights
+
+    def validate(self, num_experts: int = 128, *, require_weights: bool = False) -> None:
         routing = self.routing_expert_ids
         output = self.forced_output_ids
         ids = self.conversation_ids
@@ -60,10 +75,29 @@ class RoutingTrace:
         sorted_ids = np.sort(routing, axis=-1)
         if routing.shape[-1] > 1 and np.any(np.diff(sorted_ids, axis=-1) == 0):
             raise ValueError("top-k routing contains a duplicate Expert")
+        weights = self.routing_expert_weights
+        if require_weights and weights is None:
+            self.require_routing_weights()
+        if weights is not None:
+            if weights.shape != routing.shape:
+                raise ValueError(
+                    "routing_expert_weights must match routing_expert_ids shape"
+                )
+            if weights.dtype != np.float32:
+                raise ValueError("routing_expert_weights must use float32")
+            if not np.all(np.isfinite(weights)):
+                raise ValueError("routing_expert_weights contains a non-finite value")
+            if np.any(weights < 0):
+                raise ValueError("routing_expert_weights contains a negative value")
+            sums = weights.sum(axis=-1, dtype=np.float32)
+            if not np.allclose(sums, 1.0, atol=2e-2, rtol=0.0):
+                raise ValueError("routing_expert_weights are not normalized")
 
     def digest(self) -> str:
         hasher = hashlib.sha256()
         hasher.update(self.routing_expert_ids.tobytes(order="C"))
+        if self.routing_expert_weights is not None:
+            hasher.update(self.routing_expert_weights.tobytes(order="C"))
         hasher.update(self.forced_output_ids.tobytes(order="C"))
         for conversation_id in self.conversation_ids:
             hasher.update(str(conversation_id).encode("utf-8"))
@@ -82,6 +116,11 @@ class RoutingTrace:
             forced_output_ids=self.forced_output_ids[:count].copy(),
             routing_expert_ids=self.routing_expert_ids[:count].copy(),
             metadata=metadata,
+            routing_expert_weights=(
+                self.routing_expert_weights[:count].copy()
+                if self.routing_expert_weights is not None
+                else None
+            ),
         )
 
     def save(self, path: str | Path) -> None:
@@ -89,9 +128,12 @@ class RoutingTrace:
         target.parent.mkdir(parents=True, exist_ok=True)
         self.validate(int(self.metadata.get("num_experts", 128)))
         metadata = dict(self.metadata)
+        metadata.update(provenance(trace_sha256=self.digest()))
         metadata.update(
             {
-                "schema_version": TRACE_SCHEMA_VERSION,
+                "schema_version": (
+                    TRACE_SCHEMA_VERSION if self.has_routing_weights else 1
+                ),
                 "num_requests": self.num_requests,
                 "output_tokens": self.output_tokens,
                 "num_layers": self.num_layers,
@@ -104,15 +146,17 @@ class RoutingTrace:
         )
         try:
             with os.fdopen(descriptor, "wb") as handle:
-                np.savez_compressed(
-                    handle,
-                    conversation_ids=self.conversation_ids,
-                    forced_output_ids=self.forced_output_ids,
-                    routing_expert_ids=self.routing_expert_ids,
-                    metadata_json=np.asarray(
+                arrays = {
+                    "conversation_ids": self.conversation_ids,
+                    "forced_output_ids": self.forced_output_ids,
+                    "routing_expert_ids": self.routing_expert_ids,
+                    "metadata_json": np.asarray(
                         json.dumps(metadata, sort_keys=True), dtype=np.str_
                     ),
-                )
+                }
+                if self.routing_expert_weights is not None:
+                    arrays["routing_expert_weights"] = self.routing_expert_weights
+                np.savez_compressed(handle, **arrays)
             os.replace(temporary, target)
         except BaseException:
             try:
@@ -124,6 +168,11 @@ class RoutingTrace:
     @classmethod
     def load(cls, path: str | Path) -> "RoutingTrace":
         with np.load(path, allow_pickle=False) as archive:
+            weights = (
+                archive["routing_expert_weights"].astype(np.float32, copy=True)
+                if "routing_expert_weights" in archive.files
+                else None
+            )
             trace = cls(
                 conversation_ids=archive["conversation_ids"].copy(),
                 forced_output_ids=archive["forced_output_ids"].astype(
@@ -133,6 +182,7 @@ class RoutingTrace:
                     np.uint8, copy=True
                 ),
                 metadata=json.loads(str(archive["metadata_json"].item())),
+                routing_expert_weights=weights,
             )
         trace.validate(int(trace.metadata.get("num_experts", 128)))
         expected = trace.metadata.get("trace_sha256")
@@ -147,15 +197,22 @@ def concatenate_parts(parts: list[Path], output: Path, metadata: dict[str, Any])
     conversation_ids: list[str] = []
     forced_ids: list[np.ndarray] = []
     routes: list[np.ndarray] = []
+    weights: list[np.ndarray] = []
     for part in parts:
         with np.load(part, allow_pickle=False) as archive:
             conversation_ids.append(str(archive["conversation_id"].item()))
             forced_ids.append(archive["forced_output_ids"].astype(np.int32))
             routes.append(archive["routing_expert_ids"].astype(np.uint8))
+            if "routing_expert_weights" not in archive.files:
+                raise ValueError(
+                    f"{part}: legacy ID-only part cannot be finalized as schema v2"
+                )
+            weights.append(archive["routing_expert_weights"].astype(np.float32))
     trace = RoutingTrace(
         conversation_ids=np.asarray(conversation_ids, dtype=np.str_),
         forced_output_ids=np.stack(forced_ids),
         routing_expert_ids=np.stack(routes),
         metadata=metadata,
+        routing_expert_weights=np.stack(weights),
     )
     trace.save(output)

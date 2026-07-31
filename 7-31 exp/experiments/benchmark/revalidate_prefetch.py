@@ -79,7 +79,10 @@ def _trial(
         max_cache_length=peak_sequence_length,
         initial_sequence_length=input_tokens,
     )
-    engine.set_forced_routing(trace.routing_expert_ids[:batch_size, :steps])
+    engine.set_forced_routing(
+        trace.routing_expert_ids[:batch_size, :steps],
+        trace.require_routing_weights()[:batch_size, :steps],
+    )
     torch.cuda.synchronize()
     cuda_started = torch.cuda.Event(enable_timing=True)
     cuda_stopped = torch.cuda.Event(enable_timing=True)
@@ -166,6 +169,7 @@ def main() -> None:
         dtype=np.int64,
     )
     trace = RoutingTrace.load(args.forced_routing_trace)
+    trace.validate(config.model.num_experts_per_layer, require_weights=True)
     if [str(value) for value in trace.conversation_ids[: args.batch_size]] != [
         str(row["conversation_id"]) for row in examples
     ]:

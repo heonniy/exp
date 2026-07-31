@@ -52,6 +52,7 @@ class SimulationResult:
     access_order: str
     admission_policy: str
     random_seed: int | None
+    request_order_seed: int | None
     window_size: int | None
     window_min_frequency: int | None
     per_layer: list[dict]
@@ -66,6 +67,7 @@ def simulate(
     expert_bytes: int,
     batch_size: int,
     retain_state_across_waves: bool = True,
+    request_order_seed: int | None = None,
 ) -> SimulationResult:
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
@@ -81,18 +83,22 @@ def simulate(
     lifetimes: list[int] = []
     tick = 0
 
+    request_order = np.arange(trace.num_requests)
+    if request_order_seed is not None:
+        request_order = np.random.default_rng(request_order_seed).permutation(
+            request_order
+        )
     for wave_index, start in enumerate(range(0, trace.num_requests, batch_size)):
         if wave_index and not retain_state_across_waves:
             policy.reset_dynamic_state()
         stop = min(start + batch_size, trace.num_requests)
+        request_indices = request_order[start:stop]
         for step in range(trace.output_tokens):
             for layer_id in range(trace.num_layers):
-                active = tuple(
-                    int(value)
-                    for value in np.unique(
-                        trace.routing_expert_ids[start:stop, step, layer_id, :]
-                    )
-                )
+                flattened = trace.routing_expert_ids[
+                    request_indices, step, layer_id, :
+                ].reshape(-1)
+                active = tuple(dict.fromkeys(int(value) for value in flattened))
                 policy.begin_layer_step(layer_id, active)
                 ordered = policy.order_active_experts(layer_id, active)
                 if len(ordered) != len(active) or set(ordered) != set(active):
@@ -174,6 +180,7 @@ def simulate(
             if metadata["random_seed"] is not None
             else None
         ),
+        request_order_seed=request_order_seed,
         window_size=(
             int(metadata["window_size"])
             if metadata["window_size"] is not None

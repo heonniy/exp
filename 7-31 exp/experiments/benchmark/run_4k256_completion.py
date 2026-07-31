@@ -13,7 +13,7 @@ from experiments.benchmark.run_runtime_sweep import (
     resolve_batch_size,
 )
 from experiments.common.config import load_config
-from experiments.common.io import atomic_write_json
+from experiments.common.io import atomic_write_json, git_sha
 from experiments.trace.trace_schema import RoutingTrace
 
 
@@ -156,7 +156,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("experiments/results/completion_4k256_1200"),
+        default=None,
     )
     args = parser.parse_args()
 
@@ -172,12 +172,20 @@ def main() -> None:
     if args.common_batch_size <= 0:
         raise ValueError("common batch size must be positive")
     trace = RoutingTrace.load(args.forced_routing_trace)
+    trace.validate(config.model.num_experts_per_layer, require_weights=True)
     if args.requests > trace.num_requests:
         raise ValueError("validation request count exceeds the forced trace")
 
+    if args.output_dir is None:
+        args.output_dir = (
+            Path("experiments/results/by_commit")
+            / git_sha()[:12]
+            / "completion_4k256_1200"
+        )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     bmax_dir = args.output_dir / "bmax"
     bmax_dir.mkdir(parents=True, exist_ok=True)
+    provisional_bmax_dir = args.output_dir / "bmax_one_step_provisional"
     bmax_paths = _result_paths(
         bmax_dir, config.runtime_k, config.model.num_experts_per_layer
     )
@@ -205,7 +213,30 @@ def main() -> None:
                 "--permanent-method",
                 args.permanent_method,
                 "--output-dir",
+                str(provisional_bmax_dir),
+            ]
+        )
+        _run(
+            [
+                sys.executable,
+                "-m",
+                "experiments.benchmark.validate_bmax_256",
+                "--config",
+                str(args.config),
+                "--workload",
+                str(args.workload),
+                "--calibration-trace",
+                str(args.calibration_trace),
+                "--forced-routing-trace",
+                str(args.forced_routing_trace),
+                "--provisional-dir",
+                str(provisional_bmax_dir),
+                "--output-dir",
                 str(bmax_dir),
+                "--decode-steps",
+                "256",
+                "--permanent-method",
+                args.permanent_method,
             ]
         )
         _run(

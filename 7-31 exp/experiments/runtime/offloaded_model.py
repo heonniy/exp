@@ -85,6 +85,7 @@ class OffloadedExpertEngine:
         self.capture_routes = False
         self.captured_routes: list[tuple[int, np.ndarray]] = []
         self.forced_routing: np.ndarray | None = None
+        self.forced_routing_weights: np.ndarray | None = None
         self.decode_step: int | None = None
         self.natural_route_assignments = 0
         self.natural_route_mismatches = 0
@@ -102,6 +103,8 @@ class OffloadedExpertEngine:
         top_k_weights: torch.Tensor,
     ) -> torch.Tensor:
         if self.forced_routing is not None:
+            if self.forced_routing_weights is None:
+                raise RuntimeError("forced Expert IDs require recorded routing weights")
             if self.decode_step is None:
                 raise RuntimeError("forced routing is active without a decode step")
             forced = torch.as_tensor(
@@ -113,6 +116,16 @@ class OffloadedExpertEngine:
                 raise ValueError(
                     f"forced route shape {tuple(forced.shape)} does not match "
                     f"runtime shape {tuple(top_k_index.shape)}"
+                )
+            forced_weights = torch.as_tensor(
+                self.forced_routing_weights[:, self.decode_step, layer_id, :],
+                dtype=top_k_weights.dtype,
+                device=top_k_weights.device,
+            )
+            if forced_weights.shape != top_k_weights.shape:
+                raise ValueError(
+                    f"forced weight shape {tuple(forced_weights.shape)} does not match "
+                    f"runtime shape {tuple(top_k_weights.shape)}"
                 )
             self.natural_route_assignments += forced.numel()
             position_mismatch = forced != top_k_index
@@ -151,6 +164,7 @@ class OffloadedExpertEngine:
             detail["set_mismatch_rows"] += set_mismatch_rows
             detail["order_only_rows"] += order_only_rows
             top_k_index = forced
+            top_k_weights = forced_weights
         if self.capture_routes:
             self.captured_routes.append(
                 (
@@ -170,10 +184,26 @@ class OffloadedExpertEngine:
     def reset_captured_routes(self) -> None:
         self.captured_routes.clear()
 
-    def set_forced_routing(self, routing: np.ndarray | None) -> None:
+    def set_forced_routing(
+        self,
+        routing: np.ndarray | None,
+        weights: np.ndarray | None = None,
+    ) -> None:
         if routing is not None and routing.ndim != 4:
             raise ValueError("forced routing must be [batch, token, layer, top_k]")
+        if routing is not None and weights is None:
+            raise ValueError("forced routing requires recorded routing weights")
+        if routing is None and weights is not None:
+            raise ValueError("forced routing weights require Expert IDs")
+        if weights is not None:
+            if weights.ndim != 4 or weights.shape != routing.shape:
+                raise ValueError(
+                    "forced routing weights must match [batch, token, layer, top_k]"
+                )
+            if weights.dtype != np.float32:
+                raise ValueError("forced routing weights must use float32")
         self.forced_routing = routing
+        self.forced_routing_weights = weights
         self.decode_step = None
         self.natural_route_assignments = 0
         self.natural_route_mismatches = 0
@@ -229,11 +259,9 @@ class OffloadedExpertEngine:
                 for key in sorted(self._routing_mismatch_by_step_layer)
             ],
             "forced_routing_weight_source": (
-                "natural_router_weights" if self.forced_routing is not None else None
+                "recorded_trace_weights" if self.forced_routing is not None else None
             ),
-            "forced_routing_weight_alignment_caveat": (
-                self.forced_routing is not None and self.natural_route_mismatches > 0
-            ),
+            "forced_routing_weight_alignment_caveat": False,
         }
 
 

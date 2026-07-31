@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import subprocess
+import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -13,8 +17,46 @@ def ensure_parent(path: str | Path) -> Path:
     return target
 
 
+def git_sha() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return result.stdout.strip()
+
+
+def provenance(*, trace_sha256: str | None = None) -> dict[str, Any]:
+    return {
+        "git_sha": git_sha(),
+        "command": shlex.join([sys.executable, *sys.argv]),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "trace_sha256": trace_sha256,
+    }
+
+
+def with_provenance(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    result = dict(value)
+    trace_sha256 = result.get("trace_sha256")
+    if trace_sha256 is None:
+        trace_sha256 = result.get("forced_routing_trace_sha256")
+    current = provenance(trace_sha256=trace_sha256)
+    result["git_sha"] = current["git_sha"]
+    result["command"] = current["command"]
+    result["timestamp"] = current["timestamp"]
+    result.setdefault("trace_sha256", current["trace_sha256"])
+    return result
+
+
 def atomic_write_json(path: str | Path, value: Any) -> None:
     target = ensure_parent(path)
+    value = with_provenance(value)
     descriptor, temporary = tempfile.mkstemp(
         dir=target.parent, prefix=f".{target.name}.", suffix=".tmp"
     )
@@ -51,4 +93,3 @@ def atomic_write_jsonl(path: str | Path, rows: Iterable[dict[str, Any]]) -> int:
             pass
         raise
     return count
-

@@ -6,6 +6,7 @@ from experiments.runtime.host_expert_store import (
     pack_projection_tensors,
 )
 from experiments.runtime.offloaded_model import OffloadedQwenExperts, build_routed_tokens
+from experiments.runtime.serial_expert_executor import SerialExpertExecutor
 from experiments.runtime.serial_expert_executor import interval_overlap_ms
 
 
@@ -65,3 +66,21 @@ def test_expert_projections_pack_into_one_buffer_with_zero_copy_views() -> None:
     assert all(view.untyped_storage().data_ptr() == packed.untyped_storage().data_ptr() for view in views.values())
     for name in source:
         assert torch.equal(views[name], source[name])
+
+
+def test_packed_views_produce_identical_mlp_output() -> None:
+    generator = torch.Generator().manual_seed(731)
+    source = {
+        "gate_proj": torch.randn(3, 5, generator=generator),
+        "up_proj": torch.randn(3, 5, generator=generator),
+        "down_proj": torch.randn(5, 3, generator=generator),
+    }
+    packed = pack_projection_tensors(source, pin_memory=False)
+    views = contiguous_projection_views(
+        packed,
+        {"gate_proj": (3, 5), "up_proj": (3, 5), "down_proj": (5, 3)},
+    )
+    inputs = torch.randn(7, 5, generator=generator)
+    expected = SerialExpertExecutor._mlp(inputs, source)
+    actual = SerialExpertExecutor._mlp(inputs, views)
+    assert torch.equal(actual, expected)

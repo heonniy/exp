@@ -19,7 +19,7 @@ from experiments.benchmark.run_offloaded_decode import _read_examples
 from experiments.benchmark.run_runtime_sweep import configurations
 from experiments.common.config import load_config
 from experiments.common.gpu import require_gpu0
-from experiments.common.io import atomic_write_json
+from experiments.common.io import atomic_write_json, git_sha
 from experiments.runtime.host_expert_store import PinnedExpertStore
 from experiments.runtime.offloaded_model import OffloadedExpertEngine, load_offloaded_qwen
 from experiments.runtime.residency_manager import StreamingRuntimeManager
@@ -30,7 +30,7 @@ def _validated_inputs(
     workload: Path,
     trace: RoutingTrace,
     upper: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     examples = _read_examples(workload, upper)
     workload_ids = [str(row["conversation_id"]) for row in examples]
     trace_ids = [str(value) for value in trace.conversation_ids[:upper]]
@@ -47,7 +47,11 @@ def _validated_inputs(
     token_ids = np.asarray(
         [row["forced_output_ids"][0] for row in examples], dtype=np.int64
     )
-    return token_ids, trace.routing_expert_ids[:upper, 0]
+    return (
+        token_ids,
+        trace.routing_expert_ids[:upper, 0],
+        trace.require_routing_weights()[:upper, 0],
+    )
 
 
 def main() -> None:
@@ -75,15 +79,19 @@ def main() -> None:
         default="batch_step_union_presence",
     )
     parser.add_argument("--max-batch", type=int)
-    parser.add_argument(
-        "--output-dir", type=Path, default=Path("experiments/results/bmax")
-    )
+    parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
 
     if os.environ.get("CUDA_VISIBLE_DEVICES") != "0":
         raise RuntimeError("use ./scripts/gpu0.sh for the shared Bmax sweep")
     config = load_config(args.config)
     gpu = require_gpu0(torch)
+    if args.output_dir is None:
+        args.output_dir = (
+            Path("experiments/results/by_commit")
+            / git_sha()[:12]
+            / "bmax_one_step_provisional"
+        )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     runs = list(
         configurations(config.runtime_k, config.model.num_experts_per_layer)
@@ -134,7 +142,8 @@ def main() -> None:
         raise ValueError("theoretical Bmax is zero")
 
     trace = RoutingTrace.load(args.forced_routing_trace)
-    token_ids, routing = _validated_inputs(
+    trace.validate(config.model.num_experts_per_layer, require_weights=True)
+    token_ids, routing, routing_weights = _validated_inputs(
         args.workload, trace, max(search_upper.values())
     )
     calibration = RoutingTrace.load(args.calibration_trace)
@@ -199,6 +208,7 @@ def main() -> None:
                 safety_margin_bytes=current_accounting.safety_margin_bytes,
                 token_ids=token_ids,
                 routing=routing,
+                routing_weights=routing_weights,
                 permanent_method=args.permanent_method,
             )
             probes[candidate] = value

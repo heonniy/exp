@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import multiprocessing
@@ -30,6 +31,7 @@ _WORKER_RETAIN_STATE = True
 QUOTA_CONTROLS = (
     "ascending_always_admit",
     "resident_hit_first",
+    "router_order",
     "miss_bypass",
     "no_admission",
     "window_frequency",
@@ -37,15 +39,17 @@ QUOTA_CONTROLS = (
 )
 
 
-def _simulate_worker(policy) -> SimulationResult:
+def _simulate_worker(job) -> SimulationResult:
     if _WORKER_EVALUATION is None:
         raise RuntimeError("trace-sweep worker was not initialized")
+    policy, request_order_seed = job
     return simulate(
         _WORKER_EVALUATION,
         policy,
         _WORKER_EXPERT_BYTES,
         _WORKER_BATCH_SIZE,
         _WORKER_RETAIN_STATE,
+        request_order_seed=request_order_seed,
     )
 
 
@@ -96,6 +100,16 @@ def _quota_control_policies(
                     k,
                     access_order="resident_hit_first",
                     name="quota_lru_resident_hit_first",
+                )
+            )
+        elif control == "router_order":
+            policies.append(
+                QuotaLRUPolicy(
+                    num_layers,
+                    num_experts,
+                    k,
+                    access_order="router_order",
+                    name="quota_lru_router_order",
                 )
             )
         elif control == "miss_bypass":
@@ -181,6 +195,7 @@ def run_sweep(
     random_seeds: tuple[int, ...] = (731, 732, 733),
     window_size: int = 8,
     window_min_frequency: int = 2,
+    request_order_seeds: tuple[int | None, ...] = (None,),
 ) -> list[SimulationResult]:
     if evaluation.num_layers != calibration.num_layers:
         raise ValueError("calibration/evaluation trace layer counts do not match")
@@ -239,6 +254,11 @@ def run_sweep(
                 )
         for policy in policies:
             policies_to_run.append(policy)
+    jobs = [
+        (copy.deepcopy(policy), request_order_seed)
+        for request_order_seed in request_order_seeds
+        for policy in policies_to_run
+    ]
     if workers <= 1:
         results = [
             simulate(
@@ -247,8 +267,9 @@ def run_sweep(
                 expert_bytes,
                 batch_size,
                 retain_state_across_waves,
+                request_order_seed=request_order_seed,
             )
-            for policy in policies_to_run
+            for policy, request_order_seed in jobs
         ]
     else:
         global _WORKER_EVALUATION
@@ -261,10 +282,10 @@ def run_sweep(
         _WORKER_RETAIN_STATE = retain_state_across_waves
         context = multiprocessing.get_context("fork")
         with ProcessPoolExecutor(
-            max_workers=min(workers, len(policies_to_run)),
+            max_workers=min(workers, len(jobs)),
             mp_context=context,
         ) as executor:
-            results = list(executor.map(_simulate_worker, policies_to_run))
+            results = list(executor.map(_simulate_worker, jobs))
         _WORKER_EVALUATION = None
     for result in results:
         print(
@@ -316,6 +337,12 @@ def main() -> None:
     parser.add_argument(
         "--random-seeds", nargs="+", type=int, default=[731, 732, 733]
     )
+    parser.add_argument(
+        "--request-order-seeds",
+        nargs="+",
+        type=int,
+        help="Repeat every policy after permuting evaluation requests with each seed.",
+    )
     parser.add_argument("--window-size", type=int, default=8)
     parser.add_argument("--window-min-frequency", type=int, default=2)
     parser.add_argument(
@@ -361,12 +388,22 @@ def main() -> None:
         random_seeds=tuple(args.random_seeds),
         window_size=args.window_size,
         window_min_frequency=args.window_min_frequency,
+        request_order_seeds=(
+            tuple(args.request_order_seeds)
+            if args.request_order_seeds
+            else (None,)
+        ),
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summaries = [_summary_row(result) for result in results]
     measured_bmax = _load_measured_bmax(args.bmax_csv)
-    stream2 = next(result for result in results if result.policy == "stream2")
+    stream2_by_request_seed = {
+        result.request_order_seed: result
+        for result in results
+        if result.policy == "stream2"
+    }
     for summary in summaries:
+        stream2 = stream2_by_request_seed[summary["request_order_seed"]]
         persistent_bytes = (
             evaluation.num_layers * int(summary["k"]) * args.expert_bytes
         )
@@ -397,10 +434,11 @@ def main() -> None:
             )
         )
     per_layer = []
-    stream2_layers = {
-        int(row["layer_id"]): row for row in stream2.per_layer
-    }
     for result in results:
+        stream2_layers = {
+            int(row["layer_id"]): row
+            for row in stream2_by_request_seed[result.request_order_seed].per_layer
+        }
         for row in result.per_layer:
             baseline_fetches = int(
                 stream2_layers[int(row["layer_id"])]["fetches"]
@@ -410,6 +448,7 @@ def main() -> None:
                     "policy": result.policy,
                     "k": result.k,
                     "batch_size": result.batch_size,
+                    "request_order_seed": result.request_order_seed,
                     **row,
                     "hit_rate": (
                         int(row["hits"]) / int(row["accesses"])
@@ -448,6 +487,7 @@ def main() -> None:
             "permanent_method": args.permanent_method,
             "quota_controls": args.quota_controls,
             "random_seeds": args.random_seeds,
+            "request_order_seeds": args.request_order_seeds,
             "window_size": args.window_size,
             "window_min_frequency": args.window_min_frequency,
             "bmax_csv": str(args.bmax_csv) if args.bmax_csv else None,

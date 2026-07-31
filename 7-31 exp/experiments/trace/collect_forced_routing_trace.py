@@ -27,6 +27,7 @@ def _save_part(
     conversation_id: str,
     forced_output_ids: np.ndarray,
     routing_expert_ids: np.ndarray,
+    routing_expert_weights: np.ndarray,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(
@@ -39,6 +40,7 @@ def _save_part(
                 conversation_id=np.asarray(conversation_id, dtype=np.str_),
                 forced_output_ids=forced_output_ids.astype(np.int32),
                 routing_expert_ids=routing_expert_ids.astype(np.uint8),
+                routing_expert_weights=routing_expert_weights.astype(np.float32),
             )
         os.replace(temporary, path)
     except BaseException:
@@ -51,7 +53,7 @@ def _save_part(
 
 def _router_topk(
     outputs, expected_layers: int, top_k: int, batch_size: int
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     router_logits = outputs.router_logits
     if router_logits is None or len(router_logits) != expected_layers:
         raise RuntimeError(
@@ -59,17 +61,28 @@ def _router_topk(
             f"{None if router_logits is None else len(router_logits)}"
         )
     layer_routes = []
+    layer_weights = []
     for logits in router_logits:
         final_position = logits.reshape(batch_size, -1, logits.shape[-1])[:, -1, :]
-        expert_ids = torch.topk(final_position, k=top_k, dim=-1).indices
+        probabilities = torch.nn.functional.softmax(
+            final_position, dtype=torch.float32, dim=-1
+        )
+        expert_weights, expert_ids = torch.topk(probabilities, k=top_k, dim=-1)
+        expert_weights /= expert_weights.sum(dim=-1, keepdim=True)
+        # Match Qwen3MoeTopKRouter exactly: execution receives router-logit dtype
+        # (BF16 here). Float32 storage preserves every BF16 value losslessly.
+        expert_weights = expert_weights.to(final_position.dtype)
         layer_routes.append(expert_ids.to(dtype=torch.uint8, device="cpu").numpy())
-    return np.stack(layer_routes, axis=1)
+        layer_weights.append(
+            expert_weights.to(dtype=torch.float32, device="cpu").numpy()
+        )
+    return np.stack(layer_routes, axis=1), np.stack(layer_weights, axis=1)
 
 
 @torch.inference_mode()
 def collect_batch(
     model, examples: list[dict], config: ExperimentConfig
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     device = torch.device("cuda:0")
     prompt = torch.tensor(
         [example["input_ids"] for example in examples],
@@ -102,6 +115,7 @@ def collect_batch(
         ),
         dtype=np.uint8,
     )
+    weights = np.empty(routes.shape, dtype=np.float32)
     for step in range(config.dataset.output_tokens):
         token = torch.as_tensor(
             forced[:, step, None], dtype=torch.long, device=device
@@ -115,13 +129,15 @@ def collect_batch(
             return_dict=True,
         )
         past = output.past_key_values
-        routes[:, step] = _router_topk(
+        step_routes, step_weights = _router_topk(
             output,
             config.model.num_moe_layers,
             config.model.router_top_k,
             batch_size,
         )
-    return forced, routes
+        routes[:, step] = step_routes
+        weights[:, step] = step_weights
+    return forced, routes, weights
 
 
 def load_model(config: ExperimentConfig):
@@ -183,7 +199,7 @@ def main() -> None:
         for offset in range(0, len(missing_indices), args.batch_size):
             indices = missing_indices[offset : offset + args.batch_size]
             batch = [examples[index] for index in indices]
-            forced, routes = collect_batch(model, batch, config)
+            forced, routes, weights = collect_batch(model, batch, config)
             for batch_index, example_index in enumerate(indices):
                 example = examples[example_index]
                 _save_part(
@@ -191,6 +207,7 @@ def main() -> None:
                     str(example["conversation_id"]),
                     forced[batch_index],
                     routes[batch_index],
+                    weights[batch_index],
                 )
             print(
                 f"collected {min(offset + len(indices), len(missing_indices))}/"

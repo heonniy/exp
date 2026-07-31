@@ -121,6 +121,7 @@ class QuotaLRUPolicy(ExpertPolicy):
     VALID_ACCESS_ORDERS = {
         "ascending_expert_id",
         "resident_hit_first",
+        "router_order",
         "random_expert_order",
     }
     VALID_ADMISSION_POLICIES = {
@@ -205,6 +206,8 @@ class QuotaLRUPolicy(ExpertPolicy):
                     ),
                 )
             )
+        if self.access_order == "router_order":
+            return tuple(active_experts)
         shuffled = list(ordered)
         self._rng.shuffle(shuffled)
         return tuple(shuffled)

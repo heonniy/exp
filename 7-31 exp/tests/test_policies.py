@@ -98,6 +98,11 @@ def test_quota_random_order_is_seed_reproducible() -> None:
     )
 
 
+def test_quota_router_order_preserves_first_occurrence() -> None:
+    policy = QuotaLRUPolicy(1, 8, 2, access_order="router_order")
+    assert policy.order_active_experts(0, (5, 2, 7, 1)) == (5, 2, 7, 1)
+
+
 def test_full_resident_has_no_miss() -> None:
     policy = FullResidentPolicy(2, 4)
     for layer in range(2):

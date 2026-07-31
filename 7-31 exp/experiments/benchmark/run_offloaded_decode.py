@@ -166,6 +166,11 @@ def main() -> None:
     )
     parser.add_argument("--timeline-events", action="store_true")
     parser.add_argument(
+        "--cuda-profiler-range",
+        action="store_true",
+        help="Bracket only the decode region for Nsight --capture-range=cudaProfilerApi.",
+    )
+    parser.add_argument(
         "--kv-setup",
         choices=["real_prefill", "static_zero"],
         default="real_prefill",
@@ -285,6 +290,7 @@ def main() -> None:
     forced_routing_ids_sha256 = None
     if args.forced_routing_trace is not None:
         trace = RoutingTrace.load(args.forced_routing_trace)
+        trace.validate(config.model.num_experts_per_layer, require_weights=True)
         expected_ids = [str(value) for value in trace.conversation_ids[: args.batch_size]]
         workload_ids = [str(row["conversation_id"]) for row in examples]
         if expected_ids != workload_ids:
@@ -295,11 +301,14 @@ def main() -> None:
         ):
             raise ValueError("forced token IDs differ between trace and workload")
         expected = trace.routing_expert_ids[: args.batch_size, :steps]
+        expected_weights = trace.require_routing_weights()[
+            : args.batch_size, :steps
+        ]
         forced_routing_trace_sha256 = trace.digest()
         forced_routing_ids_sha256 = __import__("hashlib").sha256(
             expected.tobytes()
         ).hexdigest()
-        engine.set_forced_routing(expected)
+        engine.set_forced_routing(expected, expected_weights)
 
     torch.cuda.reset_peak_memory_stats()
     host_before = host_store.metrics()
@@ -315,6 +324,8 @@ def main() -> None:
     wall_started = time.perf_counter()
     cuda_started = torch.cuda.Event(enable_timing=True)
     cuda_stopped = torch.cuda.Event(enable_timing=True)
+    if args.cuda_profiler_range:
+        torch.cuda.cudart().cudaProfilerStart()
     cuda_started.record()
     with torch.inference_mode():
         for step in range(steps):
@@ -333,6 +344,8 @@ def main() -> None:
             past = output.past_key_values
     cuda_stopped.record()
     torch.cuda.synchronize()
+    if args.cuda_profiler_range:
+        torch.cuda.cudart().cudaProfilerStop()
     wall_seconds = time.perf_counter() - wall_started
     cuda_seconds = cuda_started.elapsed_time(cuda_stopped) / 1000
     attention_ms = attention_timer.elapsed_ms() if attention_timer else None
@@ -421,6 +434,7 @@ def main() -> None:
             else "invalid_reference_context_static_zero_kv"
         ),
         "final_logits_sha256": final_logits_sha256,
+        "cuda_profiler_range": args.cuda_profiler_range,
         **engine_metrics,
     }
     atomic_write_json(args.output, metrics)
