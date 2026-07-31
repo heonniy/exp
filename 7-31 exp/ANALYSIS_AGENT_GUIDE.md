@@ -84,9 +84,15 @@ evaluation routing trace SHA-256 is:
 ### HBM endpoints
 
 - Stream2 k=0: theoretical Bmax 186, measured Bmax 157.
-- Full-resident k=128: theoretical Bmax 50, measured Bmax 41.
+- Permanent/Quota measured Bmax by k is 155 (2), 154 (4), 150 (8),
+  143 (16), 128 (32), 114 (48), 99 (64), and 70 (96).
+- Full-resident k=128: theoretical Bmax 50, measured Bmax 41 in both the
+  workspace-clean shared sweep and an independent fresh-process control.
 - Full residency therefore costs 116 feasible requests relative to stream2.
 - Successful full-resident probes have zero decode Expert H2D fetches.
+- Use only `completion_4k256_1200/bmax/`. The sibling directory whose name
+  contains `superseded_workspace_accumulation` is a negative control showing
+  why cuBLAS per-stream workspaces must be cleared between shared probes.
 
 ### Historical fixed-batch-50 cache behavior
 

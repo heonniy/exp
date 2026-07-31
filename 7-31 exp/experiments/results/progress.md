@@ -128,3 +128,25 @@ Both paths produced the same final-logits SHA-256:
 - The micro-ablation uses one transient slot and depth-0 fetch/wait/compute.
 - Different Experts are never grouped, batched, or concurrently executed.
 - `k=128` is emitted once as `full_resident`.
+
+## Corrected full Bmax matrix
+
+The workspace-clean shared-process sweep and the independent full-resident
+control establish:
+
+| k | Permanent Bmax | Quota Bmax |
+|---:|---:|---:|
+| 0 | 157 (Stream2) | 157 (Stream2) |
+| 2 | 155 | 155 |
+| 4 | 154 | 154 |
+| 8 | 150 | 150 |
+| 16 | 143 | 143 |
+| 32 | 128 | 128 |
+| 48 | 114 | 114 |
+| 64 | 99 | 99 |
+| 96 | 70 | 70 |
+| 128 | 41 (full resident) | 41 (full resident) |
+
+The common B=40 runtime is physically feasible for every configuration. Results
+from `bmax_superseded_workspace_accumulation/` are intentionally retained only
+as a measurement-process negative control and are not part of this matrix.

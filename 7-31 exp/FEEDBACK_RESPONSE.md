@@ -61,6 +61,28 @@ full-resident B=50 is a cache upper bound because its measured Bmax is 41. The
 completion runner uses B=40 as the common physical fixed batch and refuses to run
 if B=40 exceeds any measured policy/k Bmax.
 
+The corrected shared-process sweep clears cuBLAS per-stream workspaces between
+probes and measured the following physical Bmax values. Permanent and Quota have
+the same HBM boundary at every shared k:
+
+| k | Policy scope | Measured Bmax |
+|---:|---|---:|
+| 0 | Stream2 | 157 |
+| 2 | Permanent / Quota | 155 |
+| 4 | Permanent / Quota | 154 |
+| 8 | Permanent / Quota | 150 |
+| 16 | Permanent / Quota | 143 |
+| 32 | Permanent / Quota | 128 |
+| 48 | Permanent / Quota | 114 |
+| 64 | Permanent / Quota | 99 |
+| 96 | Permanent / Quota | 70 |
+| 128 | Full resident | 41 |
+
+An independent fresh-process full-resident control also measured Bmax=41. The
+first shared attempt accumulated cuBLAS workspaces from newly created streams and
+artificially ended at 38; it is isolated under
+`bmax_superseded_workspace_accumulation/` and must not be used.
+
 The measured-Bmax workload and common-B=40 workload each process 1,200 requests,
 256 decode steps, and the exact final partial wave. No B=50 runtime point is used
 as physical evidence.

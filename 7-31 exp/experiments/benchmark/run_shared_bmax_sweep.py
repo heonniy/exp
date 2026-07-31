@@ -173,6 +173,7 @@ def main() -> None:
             "gpu_physical_index": 0,
             "probe_mode": "real_runtime_static_peak_kv_one_decode_step",
             "shared_host_store_and_model": True,
+            "cublas_workspaces_cleared_between_probes": True,
             "permanent_method": args.permanent_method,
             "runs": manifest_runs,
         },
@@ -233,6 +234,7 @@ def main() -> None:
             "host_store_preload_seconds": preload_seconds,
             "host_store_preload_scope": "shared_bmax_sweep",
             "prefetch_submit_order": "compute_first",
+            "cublas_workspaces_cleared_between_probes": True,
             "probes": [probes[key] for key in sorted(probes)],
         }
         atomic_write_json(outputs[(policy, k)], result)
@@ -247,6 +249,7 @@ def main() -> None:
                 "gpu_physical_index": 0,
                 "probe_mode": "real_runtime_static_peak_kv_one_decode_step",
                 "shared_host_store_and_model": True,
+                "cublas_workspaces_cleared_between_probes": True,
                 "permanent_method": args.permanent_method,
                 "runs": manifest_runs,
             },

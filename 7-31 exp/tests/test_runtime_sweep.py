@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
-from experiments.benchmark.run_4k256_completion import _fixed_command
+import pytest
+
+from experiments.benchmark.run_4k256_completion import (
+    _fixed_command,
+    resolve_common_batch_size,
+)
 from experiments.benchmark.run_runtime_sweep import (
     configurations,
     resolve_batch_size,
@@ -50,3 +55,10 @@ def test_completion_separates_wall_runtime_from_timeline_profile() -> None:
     assert profile[-1] == "--timeline-events"
     order = performance.index("--prefetch-submit-order")
     assert performance[order + 1] == "compute_first"
+
+
+def test_completion_falls_back_from_common_b40_to_preapproved_b32() -> None:
+    assert resolve_common_batch_size(40, 38) == (32, True)
+    assert resolve_common_batch_size(40, 41) == (40, False)
+    with pytest.raises(ValueError):
+        resolve_common_batch_size(40, 31)

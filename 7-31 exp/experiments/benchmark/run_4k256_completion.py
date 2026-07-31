@@ -94,6 +94,17 @@ def _write_manifest(path: Path, payload: dict, runs: list[dict]) -> None:
     atomic_write_json(path, value)
 
 
+def resolve_common_batch_size(requested: int, minimum_bmax: int) -> tuple[int, bool]:
+    if requested <= minimum_bmax:
+        return requested, False
+    if requested == 40 and minimum_bmax >= 32:
+        return 32, True
+    raise ValueError(
+        f"requested common B={requested} exceeds the minimum measured "
+        f"Bmax={minimum_bmax}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -211,13 +222,35 @@ def main() -> None:
     if args.phase != "bmax" and missing_bmax:
         raise RuntimeError(f"missing {len(missing_bmax)} Bmax results")
 
+    requested_common_batch_size = args.common_batch_size
+    common_batch_fallback_applied = False
+    if not missing_bmax:
+        minimum_bmax = min(
+            resolve_batch_size(None, bmax_dir, policy, k)
+            for policy, k in configurations(
+                config.runtime_k, config.model.num_experts_per_layer
+            )
+        )
+        args.common_batch_size, common_batch_fallback_applied = (
+            resolve_common_batch_size(args.common_batch_size, minimum_bmax)
+        )
+    else:
+        minimum_bmax = None
+
     manifest_base = {
         "config": config.name,
         "gpu_physical_index": 0,
         "validation_requests": args.requests,
         "input_tokens": 4096,
         "decode_steps": 256,
+        "requested_common_batch_size": requested_common_batch_size,
         "common_batch_size": args.common_batch_size,
+        "minimum_measured_bmax": minimum_bmax,
+        "common_batch_fallback_applied": common_batch_fallback_applied,
+        "common_batch_selection_rule": (
+            "prefer B=40; fall back to the pre-approved B=32 when any "
+            "measured Bmax is below 40"
+        ),
         "permanent_method": args.permanent_method,
         "quota_runtime_control": "ascending_id_always_admit_lru",
         "performance_timeline_events": False,

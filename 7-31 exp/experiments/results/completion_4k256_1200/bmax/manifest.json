@@ -1,0 +1,118 @@
+{
+  "config": "h100_lmsys_4k256",
+  "cublas_workspaces_cleared_between_probes": true,
+  "gpu_physical_index": 0,
+  "permanent_method": "batch_step_union_presence",
+  "probe_mode": "real_runtime_static_peak_kv_one_decode_step",
+  "runs": [
+    {
+      "completed": true,
+      "k": 0,
+      "output": "experiments/results/completion_4k256_1200/bmax/stream2_k0.json",
+      "policy": "stream2"
+    },
+    {
+      "completed": true,
+      "k": 2,
+      "output": "experiments/results/completion_4k256_1200/bmax/permanent_k_k2.json",
+      "policy": "permanent_k"
+    },
+    {
+      "completed": true,
+      "k": 2,
+      "output": "experiments/results/completion_4k256_1200/bmax/quota_lru_k_k2.json",
+      "policy": "quota_lru_k"
+    },
+    {
+      "completed": true,
+      "k": 4,
+      "output": "experiments/results/completion_4k256_1200/bmax/permanent_k_k4.json",
+      "policy": "permanent_k"
+    },
+    {
+      "completed": true,
+      "k": 4,
+      "output": "experiments/results/completion_4k256_1200/bmax/quota_lru_k_k4.json",
+      "policy": "quota_lru_k"
+    },
+    {
+      "completed": true,
+      "k": 8,
+      "output": "experiments/results/completion_4k256_1200/bmax/permanent_k_k8.json",
+      "policy": "permanent_k"
+    },
+    {
+      "completed": true,
+      "k": 8,
+      "output": "experiments/results/completion_4k256_1200/bmax/quota_lru_k_k8.json",
+      "policy": "quota_lru_k"
+    },
+    {
+      "completed": true,
+      "k": 16,
+      "output": "experiments/results/completion_4k256_1200/bmax/permanent_k_k16.json",
+      "policy": "permanent_k"
+    },
+    {
+      "completed": true,
+      "k": 16,
+      "output": "experiments/results/completion_4k256_1200/bmax/quota_lru_k_k16.json",
+      "policy": "quota_lru_k"
+    },
+    {
+      "completed": true,
+      "k": 32,
+      "output": "experiments/results/completion_4k256_1200/bmax/permanent_k_k32.json",
+      "policy": "permanent_k"
+    },
+    {
+      "completed": true,
+      "k": 32,
+      "output": "experiments/results/completion_4k256_1200/bmax/quota_lru_k_k32.json",
+      "policy": "quota_lru_k"
+    },
+    {
+      "completed": true,
+      "k": 48,
+      "output": "experiments/results/completion_4k256_1200/bmax/permanent_k_k48.json",
+      "policy": "permanent_k"
+    },
+    {
+      "completed": true,
+      "k": 48,
+      "output": "experiments/results/completion_4k256_1200/bmax/quota_lru_k_k48.json",
+      "policy": "quota_lru_k"
+    },
+    {
+      "completed": true,
+      "k": 64,
+      "output": "experiments/results/completion_4k256_1200/bmax/permanent_k_k64.json",
+      "policy": "permanent_k"
+    },
+    {
+      "completed": true,
+      "k": 64,
+      "output": "experiments/results/completion_4k256_1200/bmax/quota_lru_k_k64.json",
+      "policy": "quota_lru_k"
+    },
+    {
+      "completed": true,
+      "k": 96,
+      "output": "experiments/results/completion_4k256_1200/bmax/permanent_k_k96.json",
+      "policy": "permanent_k"
+    },
+    {
+      "completed": true,
+      "k": 96,
+      "output": "experiments/results/completion_4k256_1200/bmax/quota_lru_k_k96.json",
+      "policy": "quota_lru_k"
+    },
+    {
+      "completed": true,
+      "k": 128,
+      "output": "experiments/results/completion_4k256_1200/bmax/full_resident_k128.json",
+      "policy": "full_resident"
+    }
+  ],
+  "shared_host_store_and_model": true
+}

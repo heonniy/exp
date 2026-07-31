@@ -31,6 +31,16 @@ def _detach_engine(model) -> None:
         object.__setattr__(layer.mlp.experts, "_engine", None)
 
 
+def _clear_cuda_probe_state() -> None:
+    # A new executor owns a new compute stream. cuBLAS caches a workspace per
+    # stream, and those workspaces otherwise accumulate across a shared-process
+    # Bmax sweep and make later policies look artificially memory-constrained.
+    clear_workspaces = getattr(torch._C, "_cuda_clearCublasWorkspaces", None)
+    if clear_workspaces is not None:
+        clear_workspaces()
+    torch.cuda.empty_cache()
+
+
 def _make_peak_cache(model, batch_size: int, peak_sequence_length: int):
     return make_static_kv_cache(
         model,
@@ -60,7 +70,7 @@ def probe_candidate(
 ) -> dict:
     manager = engine = cache = reserve = output = None
     _detach_engine(model)
-    torch.cuda.empty_cache()
+    _clear_cuda_probe_state()
     started = time.perf_counter()
     try:
         manager, policy_initialization_seconds = _manager(
@@ -137,7 +147,7 @@ def probe_candidate(
     finally:
         _detach_engine(model)
         del output, cache, reserve, engine, manager
-        torch.cuda.empty_cache()
+        _clear_cuda_probe_state()
 
 
 def main() -> None:
@@ -303,6 +313,7 @@ def main() -> None:
         "host_memory_mode": "pinned_weights",
         "host_store_preload_seconds": host_store_preload_seconds,
         "prefetch_submit_order": "compute_first",
+        "cublas_workspaces_cleared_between_probes": True,
         "probes": [probes[key] for key in sorted(probes)],
     }
     atomic_write_json(args.output, result)

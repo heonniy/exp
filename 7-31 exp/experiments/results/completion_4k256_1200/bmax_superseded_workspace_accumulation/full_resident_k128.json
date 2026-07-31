@@ -1,0 +1,79 @@
+{
+  "config": "h100_lmsys_4k256",
+  "dense_resident_bytes": 3082186752,
+  "fixed_workspace_bytes": 0,
+  "forced_routing_trace": "artifacts/traces/evaluation_4k256.npz",
+  "forced_routing_trace_sha256": "2dd67a486095614f1ec2071bbf0ac2cfc34fe097def9062bf1c9511f2dbaadac",
+  "gpu_physical_index": 0,
+  "host_memory_mode": "pinned_weights",
+  "host_store_preload_scope": "shared_bmax_sweep",
+  "host_store_preload_seconds": 257.2378950600105,
+  "k": 128,
+  "kv_budget_bytes": 21797769216,
+  "kv_bytes_per_request": 427819008,
+  "measured_bmax": 38,
+  "permanent_method": null,
+  "persistent_expert_bytes": 57982058496,
+  "policy": "full_resident",
+  "prefetch_submit_order": "compute_first",
+  "probe_mode": "real_runtime_static_peak_kv_one_decode_step",
+  "probes": [
+    {
+      "batch_size": 25,
+      "elapsed_seconds": 2.574224370997399,
+      "expert_h2d_copy_operations": 0,
+      "expert_h2d_fetches": 0,
+      "feasible": true,
+      "forced_routing": true,
+      "h2d_copy_operations_per_fetch": 1,
+      "peak_allocated_bytes": 76783390720,
+      "peak_reserved_bytes": 77057753088,
+      "policy_initialization_seconds": 1.8666978910041507,
+      "prefetch_submit_order": "compute_first"
+    },
+    {
+      "batch_size": 38,
+      "elapsed_seconds": 3.109670724021271,
+      "expert_h2d_copy_operations": 0,
+      "expert_h2d_fetches": 0,
+      "feasible": true,
+      "forced_routing": true,
+      "h2d_copy_operations_per_fetch": 1,
+      "peak_allocated_bytes": 83272464896,
+      "peak_reserved_bytes": 83561021440,
+      "policy_initialization_seconds": 2.25998428199091,
+      "prefetch_submit_order": "compute_first"
+    },
+    {
+      "batch_size": 39,
+      "elapsed_seconds": 2.0201588830095716,
+      "error": "CUDA out of memory. Tried to allocate 1.29 GiB. GPU 0 has a total capacity of 79.19 GiB of which 1.28 GiB is free. Including non-PyTorch memory, this process has 77.71 GiB memory in use. Of the allocated memory 76.72 GiB is allocated by PyTorch, and 263.93 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "feasible": false,
+      "peak_allocated_bytes": 82380393984,
+      "peak_reserved_bytes": 82657148928
+    },
+    {
+      "batch_size": 41,
+      "elapsed_seconds": 1.9957787269959226,
+      "error": "CUDA out of memory. Tried to allocate 1.36 GiB. GPU 0 has a total capacity of 79.19 GiB of which 434.50 MiB is free. Including non-PyTorch memory, this process has 78.57 GiB memory in use. Of the allocated memory 77.59 GiB is allocated by PyTorch, and 259.90 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "feasible": false,
+      "peak_allocated_bytes": 83307367936,
+      "peak_reserved_bytes": 83579895808
+    },
+    {
+      "batch_size": 44,
+      "elapsed_seconds": 2.0011050869943574,
+      "error": "CUDA out of memory. Tried to allocate 1.46 GiB. GPU 0 has a total capacity of 79.19 GiB of which 594.50 MiB is free. Including non-PyTorch memory, this process has 78.41 GiB memory in use. Of the allocated memory 77.42 GiB is allocated by PyTorch, and 269.86 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "feasible": false,
+      "peak_allocated_bytes": 83130612224,
+      "peak_reserved_bytes": 83412123648
+    }
+  ],
+  "safety_margin_bytes": 2147483648,
+  "search_truncated_below_theoretical": false,
+  "search_upper_batch": 50,
+  "theoretical_bmax": 50,
+  "total_hbm_bytes": 85028372480,
+  "transient_expert_bytes": 18874368,
+  "user_max_batch_cap": null
+}

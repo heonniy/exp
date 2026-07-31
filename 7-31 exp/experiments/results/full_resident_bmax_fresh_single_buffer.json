@@ -1,0 +1,83 @@
+{
+  "config": "h100_lmsys_4k256",
+  "dense_resident_bytes": 3082186752,
+  "fixed_workspace_bytes": 0,
+  "forced_routing_trace": "artifacts/traces/evaluation_4k256.npz",
+  "forced_routing_trace_sha256": "2dd67a486095614f1ec2071bbf0ac2cfc34fe097def9062bf1c9511f2dbaadac",
+  "gpu_physical_index": 0,
+  "host_memory_mode": "pinned_weights",
+  "host_store_preload_seconds": 244.52178426002502,
+  "k": 128,
+  "kv_budget_bytes": 21797769216,
+  "kv_bytes_per_request": 427819008,
+  "measured_bmax": 41,
+  "permanent_method": null,
+  "persistent_expert_bytes": 57982058496,
+  "policy": "full_resident",
+  "prefetch_submit_order": "compute_first",
+  "probe_mode": "real_runtime_static_peak_kv_one_decode_step",
+  "probes": [
+    {
+      "batch_size": 25,
+      "elapsed_seconds": 3.3861979540088214,
+      "expert_h2d_copy_operations": 0,
+      "expert_h2d_fetches": 0,
+      "feasible": true,
+      "forced_routing": true,
+      "h2d_copy_operations_per_fetch": 1,
+      "peak_allocated_bytes": 75776757760,
+      "peak_reserved_bytes": 75799461888,
+      "policy_initialization_seconds": 2.0554302620003,
+      "prefetch_submit_order": "compute_first"
+    },
+    {
+      "batch_size": 38,
+      "elapsed_seconds": 3.8032053829811048,
+      "expert_h2d_copy_operations": 0,
+      "expert_h2d_fetches": 0,
+      "feasible": true,
+      "forced_routing": true,
+      "h2d_copy_operations_per_fetch": 1,
+      "peak_allocated_bytes": 82299386368,
+      "peak_reserved_bytes": 82344673280,
+      "policy_initialization_seconds": 2.833450443984475,
+      "prefetch_submit_order": "compute_first"
+    },
+    {
+      "batch_size": 41,
+      "elapsed_seconds": 4.156441147992155,
+      "expert_h2d_copy_operations": 0,
+      "expert_h2d_fetches": 0,
+      "feasible": true,
+      "forced_routing": true,
+      "h2d_copy_operations_per_fetch": 1,
+      "peak_allocated_bytes": 83830419456,
+      "peak_reserved_bytes": 83896565760,
+      "policy_initialization_seconds": 2.929562295001233,
+      "prefetch_submit_order": "compute_first"
+    },
+    {
+      "batch_size": 42,
+      "elapsed_seconds": 3.4451034660160076,
+      "error": "CUDA out of memory. Tried to allocate 1.39 GiB. GPU 0 has a total capacity of 79.19 GiB of which 1.07 GiB is free. Including non-PyTorch memory, this process has 77.92 GiB memory in use. Of the allocated memory 77.14 GiB is allocated by PyTorch, and 53.89 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "feasible": false,
+      "peak_allocated_bytes": 82831330816,
+      "peak_reserved_bytes": 82887835648
+    },
+    {
+      "batch_size": 44,
+      "elapsed_seconds": 3.7479728479811456,
+      "error": "CUDA out of memory. Tried to allocate 1.46 GiB. GPU 0 has a total capacity of 79.19 GiB of which 254.50 MiB is free. Including non-PyTorch memory, this process has 78.74 GiB memory in use. Of the allocated memory 77.97 GiB is allocated by PyTorch, and 41.86 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "feasible": false,
+      "peak_allocated_bytes": 83724750336,
+      "peak_reserved_bytes": 83768639488
+    }
+  ],
+  "safety_margin_bytes": 2147483648,
+  "search_truncated_below_theoretical": false,
+  "search_upper_batch": 50,
+  "theoretical_bmax": 50,
+  "total_hbm_bytes": 85028372480,
+  "transient_expert_bytes": 18874368,
+  "user_max_batch_cap": null
+}
