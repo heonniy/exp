@@ -1,0 +1,42 @@
+{
+  "command": "'/home/hwlee/MoE-Exp/7-31 exp/.venv/bin/python' '/home/hwlee/MoE-Exp/7-31 exp/experiments/analysis/analyze_nsys_expert_copies.py' --sqlite experiments/results/by_commit/5c05c88/nsight_stream2_k0.sqlite --runtime experiments/results/by_commit/5c05c88/nsight_stream2_k0_runtime.json --expert-bytes 9437184 --output experiments/results/by_commit/5c05c88/nsight_one_copy_verification.json",
+  "expected_expert_fetches": 384,
+  "expert_bytes": 9437184,
+  "forced_routing_trace_sha256": "a70b55758382914f445a08ff8a58e955ec75ad7ab1444899af753df19fdc4c6e",
+  "git_sha": "5c05c88eecf988a3346cd71f85ad94f991edeb4d",
+  "memcpy_size_distribution": [
+    {
+      "bytes": 4,
+      "operations": 384,
+      "total_duration_ns": 864672
+    },
+    {
+      "bytes": 8,
+      "operations": 241,
+      "total_duration_ns": 557698
+    },
+    {
+      "bytes": 16,
+      "operations": 48,
+      "total_duration_ns": 34912
+    },
+    {
+      "bytes": 64,
+      "operations": 384,
+      "total_duration_ns": 545376
+    },
+    {
+      "bytes": 9437184,
+      "operations": 384,
+      "total_duration_ns": 66874070
+    }
+  ],
+  "nsight_sqlite": "experiments/results/by_commit/5c05c88/nsight_stream2_k0.sqlite",
+  "observed_expert_sized_memcpy_operations": 384,
+  "one_copy_per_fetch_verified": true,
+  "runtime_expert_h2d_copy_operations": 384,
+  "runtime_result": "experiments/results/by_commit/5c05c88/nsight_stream2_k0_runtime.json",
+  "timestamp": "2026-07-31T18:51:50.239031+00:00",
+  "trace_sha256": "a70b55758382914f445a08ff8a58e955ec75ad7ab1444899af753df19fdc4c6e",
+  "validation": "nsight_one_packed_h2d_copy_per_expert_fetch"
+}
