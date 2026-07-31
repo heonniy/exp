@@ -163,7 +163,7 @@ def main() -> None:
         raise ValueError("decode steps exceed the fixed workload output length")
     examples = _read_examples(args.workload, args.batch_size)
     forced_tokens = np.asarray(
-        [row["forced_output_ids"][:steps] for row in examples], dtype=np.int64
+        [row["forced_output_ids"][:steps] for row in examples], dtype=np.int32
     )
     if args.host_memory_mode == "pinned_weights" and args.max_pinned_experts < (
         config.model.num_moe_layers * config.model.num_experts_per_layer
@@ -259,6 +259,11 @@ def main() -> None:
         workload_ids = [str(row["conversation_id"]) for row in examples]
         if expected_ids != workload_ids:
             raise ValueError("forced routing trace does not match workload row order")
+        if not np.array_equal(
+            trace.forced_output_ids[: args.batch_size, :steps],
+            forced_tokens,
+        ):
+            raise ValueError("forced token IDs differ between trace and workload")
         expected = trace.routing_expert_ids[: args.batch_size, :steps]
         forced_routing_trace_sha256 = trace.digest()
         forced_routing_ids_sha256 = __import__("hashlib").sha256(

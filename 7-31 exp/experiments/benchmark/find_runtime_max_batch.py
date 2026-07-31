@@ -192,6 +192,14 @@ def main() -> None:
     trace_ids = [str(value) for value in trace.conversation_ids[:upper]]
     if workload_ids != trace_ids:
         raise ValueError("forced routing trace does not match workload row order")
+    workload_forced = np.asarray(
+        [row["forced_output_ids"] for row in examples], dtype=np.int32
+    )
+    if not np.array_equal(
+        trace.forced_output_ids[:upper, : workload_forced.shape[1]],
+        workload_forced,
+    ):
+        raise ValueError("forced token IDs differ between trace and workload")
     token_ids = np.asarray(
         [row["forced_output_ids"][0] for row in examples], dtype=np.int64
     )

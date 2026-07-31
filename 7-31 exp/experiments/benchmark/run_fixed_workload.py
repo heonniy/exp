@@ -89,6 +89,14 @@ def main() -> None:
     trace_ids = [str(value) for value in trace.conversation_ids[:requests]]
     if workload_ids != trace_ids:
         raise ValueError("forced routing trace does not match workload row order")
+    workload_forced = np.asarray(
+        [row["forced_output_ids"][:steps] for row in examples],
+        dtype=np.int32,
+    )
+    if not np.array_equal(
+        trace.forced_output_ids[:requests, :steps], workload_forced
+    ):
+        raise ValueError("forced token IDs differ between trace and workload")
     calibration = (
         RoutingTrace.load(args.calibration_trace)
         if args.calibration_trace is not None
@@ -265,10 +273,7 @@ def main() -> None:
         "policy_initialization_seconds": policy_initialization_seconds,
         "forced_routing_trace_sha256": trace.digest(),
         "forced_output_ids_sha256": hashlib.sha256(
-            np.asarray(
-                [row["forced_output_ids"][:steps] for row in examples],
-                dtype=np.int64,
-            ).tobytes()
+            workload_forced.tobytes()
         ).hexdigest(),
         "final_logits_sha256_by_wave": logits_digests,
         "natural_route_mismatch_rate": (
