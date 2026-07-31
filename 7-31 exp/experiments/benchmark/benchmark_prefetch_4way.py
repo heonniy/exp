@@ -21,6 +21,12 @@ from experiments.runtime.serial_expert_executor import SerialExpertExecutor
 MODES = ("compute_only", "copy_only", "sequential_copy_compute", "double_buffer_overlap")
 
 
+def rotated_modes(repeat: int) -> tuple[str, ...]:
+    """Deterministically rotate modes to remove fixed-order clock/thermal bias."""
+    offset = repeat % len(MODES)
+    return MODES[offset:] + MODES[:offset]
+
+
 def _digest(tensor: torch.Tensor | None) -> str | None:
     if tensor is None:
         return None
@@ -243,8 +249,8 @@ def main() -> None:
     )
     torch.cuda.synchronize()
 
-    for mode in MODES:
-        for _ in range(args.warmups):
+    for warmup in range(args.warmups):
+        for mode in rotated_modes(warmup):
             _trial(
                 mode=mode,
                 source=source,
@@ -256,7 +262,7 @@ def main() -> None:
             )
     trials = {mode: [] for mode in MODES}
     for repeat in range(args.repeats):
-        for mode in MODES:
+        for sequence_position, mode in enumerate(rotated_modes(repeat)):
             value = _trial(
                 mode=mode,
                 source=source,
@@ -267,10 +273,11 @@ def main() -> None:
                 instrument_operations=False,
             )
             value["repeat"] = repeat
+            value["execution_sequence_position"] = sequence_position
             trials[mode].append(value)
     profiles = {mode: [] for mode in MODES}
     for repeat in range(args.profile_repeats):
-        for mode in MODES:
+        for sequence_position, mode in enumerate(rotated_modes(repeat)):
             value = _trial(
                 mode=mode,
                 source=source,
@@ -281,6 +288,7 @@ def main() -> None:
                 instrument_operations=True,
             )
             value["repeat"] = repeat
+            value["execution_sequence_position"] = sequence_position
             profiles[mode].append(value)
 
     summaries = {
@@ -321,6 +329,7 @@ def main() -> None:
         "warmups": args.warmups,
         "repeats": args.repeats,
         "profile_repeats": args.profile_repeats,
+        "mode_order_control": "deterministic_rotation_by_repeat",
         "expert_bytes": source.numel() * source.element_size(),
         "expert_layout": "single_contiguous_pinned_tensor",
         "h2d_copy_operations_per_iteration": 1,
