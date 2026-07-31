@@ -64,6 +64,7 @@ def main() -> None:
         default="static_zero",
     )
     parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
+    parser.add_argument("--timeline-events", action="store_true")
     parser.add_argument(
         "--output-dir", type=Path, default=Path("experiments/results/runtime_sweep")
     )
@@ -113,6 +114,8 @@ def main() -> None:
         ]
         if args.decode_steps is not None:
             command.extend(["--decode-steps", str(args.decode_steps)])
+        if args.timeline_events:
+            command.append("--timeline-events")
         commands.append(
             {
                 "policy": policy,
@@ -137,6 +140,7 @@ def main() -> None:
             "decode_steps": args.decode_steps or config.dataset.output_tokens,
             "kv_setup": args.kv_setup,
             "prefetch_depth": args.prefetch_depth,
+            "timeline_events": args.timeline_events,
             "dry_run": args.dry_run,
             "runs": commands,
         },

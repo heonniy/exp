@@ -28,6 +28,34 @@ from experiments.trace.select_permanent import select_topk
 from experiments.trace.trace_schema import RoutingTrace
 
 
+class CudaModuleTimer:
+    def __init__(self, modules: list[torch.nn.Module]):
+        self._started: dict[torch.nn.Module, torch.cuda.Event] = {}
+        self._pairs: list[tuple[torch.cuda.Event, torch.cuda.Event]] = []
+        self._handles = []
+        for module in modules:
+            self._handles.append(module.register_forward_pre_hook(self._pre))
+            self._handles.append(module.register_forward_hook(self._post))
+
+    def _pre(self, module, _inputs) -> None:
+        started = torch.cuda.Event(enable_timing=True)
+        started.record(torch.cuda.current_stream())
+        self._started[module] = started
+
+    def _post(self, module, _inputs, _output) -> None:
+        stopped = torch.cuda.Event(enable_timing=True)
+        stopped.record(torch.cuda.current_stream())
+        self._pairs.append((self._started.pop(module), stopped))
+
+    def elapsed_ms(self) -> float:
+        return sum(start.elapsed_time(stop) for start, stop in self._pairs)
+
+    def remove(self) -> None:
+        for handle in self._handles:
+            handle.remove()
+        self._handles.clear()
+
+
 def _read_examples(path: Path, count: int) -> list[dict]:
     rows = []
     with path.open("r", encoding="utf-8") as handle:
@@ -110,6 +138,7 @@ def main() -> None:
     )
     parser.add_argument("--max-pinned-experts", type=int, default=16)
     parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
+    parser.add_argument("--timeline-events", action="store_true")
     parser.add_argument(
         "--kv-setup",
         choices=["real_prefill", "static_zero"],
@@ -159,7 +188,10 @@ def main() -> None:
     # counters are discarded before the decode-only timer.
     prefill_manager = StreamingRuntimeManager()
     prefill_engine = OffloadedExpertEngine(
-        host_store, prefill_manager, prefetch_depth=args.prefetch_depth
+        host_store,
+        prefill_manager,
+        prefetch_depth=args.prefetch_depth,
+        track_timeline=False,
     )
     model_load_started = time.perf_counter()
     model = load_offloaded_qwen(config.model.path, prefill_engine)
@@ -210,7 +242,10 @@ def main() -> None:
         calibration,
     )
     engine = OffloadedExpertEngine(
-        host_store, manager, prefetch_depth=args.prefetch_depth
+        host_store,
+        manager,
+        prefetch_depth=args.prefetch_depth,
+        track_timeline=args.timeline_events,
     )
     attach_engine(model, engine)
     torch.cuda.empty_cache()
@@ -227,6 +262,14 @@ def main() -> None:
 
     torch.cuda.reset_peak_memory_stats()
     host_before = host_store.metrics()
+    attention_timer = router_timer = None
+    if args.timeline_events:
+        attention_timer = CudaModuleTimer(
+            [layer.self_attn for layer in model.model.layers]
+        )
+        router_timer = CudaModuleTimer(
+            [layer.mlp.gate for layer in model.model.layers]
+        )
     torch.cuda.synchronize()
     wall_started = time.perf_counter()
     cuda_started = torch.cuda.Event(enable_timing=True)
@@ -251,6 +294,12 @@ def main() -> None:
     torch.cuda.synchronize()
     wall_seconds = time.perf_counter() - wall_started
     cuda_seconds = cuda_started.elapsed_time(cuda_stopped) / 1000
+    attention_ms = attention_timer.elapsed_ms() if attention_timer else None
+    router_ms = router_timer.elapsed_ms() if router_timer else None
+    if attention_timer:
+        attention_timer.remove()
+    if router_timer:
+        router_timer.remove()
     generated = args.batch_size * steps
     engine_metrics = engine.metrics()
     host_after = host_store.metrics()
@@ -286,6 +335,25 @@ def main() -> None:
         ),
         "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
         "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
+        "copy_engine_utilization": (
+            engine_metrics["total_h2d_duration_ms"] / (cuda_seconds * 1000)
+            if engine_metrics["timeline_events_enabled"] and cuda_seconds
+            else None
+        ),
+        "attention_ms": attention_ms,
+        "router_ms": router_ms,
+        "other_dense_host_idle_ms": (
+            max(
+                0.0,
+                wall_seconds * 1000
+                - attention_ms
+                - router_ms
+                - engine_metrics["expert_compute_ms"]
+                - engine_metrics["exposed_h2d_stall_ms"],
+            )
+            if args.timeline_events
+            else None
+        ),
         "forced_output_ids_sha256": __import__("hashlib")
         .sha256(forced_tokens.tobytes())
         .hexdigest(),

@@ -50,6 +50,7 @@ class OffloadedExpertEngine:
         manager: RuntimeResidencyManager,
         dtype: torch.dtype = torch.bfloat16,
         prefetch_depth: int = 1,
+        track_timeline: bool = False,
     ):
         self.host_store = host_store
         self.manager = manager
@@ -63,6 +64,7 @@ class OffloadedExpertEngine:
                 self.manager.lookup,
                 self.manager.on_resident_hit,
                 self.manager.on_transient_complete,
+                track_timeline,
             )
         elif prefetch_depth == 0:
             self.transient_buffer = TransientSingleBuffer(
@@ -74,6 +76,7 @@ class OffloadedExpertEngine:
                 self.manager.lookup,
                 self.manager.on_resident_hit,
                 self.manager.on_transient_complete,
+                track_timeline,
             )
         else:
             raise ValueError("only prefetch_depth 0 or 1 is implemented")

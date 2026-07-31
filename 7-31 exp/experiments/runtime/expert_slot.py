@@ -49,7 +49,8 @@ class ExpertSlot:
         expert_id: int,
         source: Mapping[str, torch.Tensor],
         copy_stream: torch.cuda.Stream,
-    ) -> None:
+        record_timing: bool = False,
+    ) -> tuple[torch.cuda.Event, torch.cuda.Event] | None:
         if set(source) != set(self.tensors):
             raise ValueError("source tensors do not match the Expert slot layout")
         if self._has_copy_event:
@@ -65,9 +66,16 @@ class ExpertSlot:
             for name, host_tensor in source.items():
                 copy_source[name].copy_(host_tensor)
         self._copy_source = copy_source
+        copy_started = (
+            torch.cuda.Event(enable_timing=True) if record_timing else None
+        )
+        if record_timing:
+            self.copy_done = torch.cuda.Event(enable_timing=True)
         with torch.cuda.stream(copy_stream):
             if self._has_compute_event:
                 copy_stream.wait_event(self.compute_done)
+            if copy_started is not None:
+                copy_started.record(copy_stream)
             for name, destination in self.tensors.items():
                 host_tensor = copy_source[name]
                 if host_tensor.device.type != "cpu":
@@ -80,6 +88,9 @@ class ExpertSlot:
             self.copy_done.record(copy_stream)
         self.identity = SlotIdentity(layer_id=layer_id, expert_id=expert_id)
         self._has_copy_event = True
+        if copy_started is None:
+            return None
+        return copy_started, self.copy_done
 
     def wait_until_ready(self, compute_stream: torch.cuda.Stream) -> None:
         if not self._has_copy_event:

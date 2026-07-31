@@ -67,4 +67,76 @@ go under `artifacts/` or `experiments/results/`.
   --output experiments/results/stream2_b1.json
 ```
 
-See `--help` on each module for smaller smoke-test sizes.
+The primary decode-only path can allocate the full 4,352-token KV shape without
+timing prompt prefill:
+
+```bash
+./scripts/gpu0.sh .venv/bin/python -m experiments.benchmark.run_offloaded_decode \
+  --config experiments/configs/h100_lmsys_4k256.yaml \
+  --workload artifacts/data/lmsys_4k256_evaluation.jsonl \
+  --policy stream2 --k 0 --batch-size 1 --kv-setup static_zero \
+  --host-memory-mode pinned_weights --max-pinned-experts 6144 \
+  --forced-routing-trace artifacts/traces/evaluation_4k256.npz \
+  --output experiments/results/stream2_static_kv_b1.json
+```
+
+`static_zero` is a decode-only memory/performance fixture. It preallocates the real
+Transformers `StaticCache`, initializes its sequence length to 4,096, and runs the
+real attention/router/Expert code for the 256 replayed tokens. Use `real_prefill`
+when prompt-dependent KV values or end-to-end timing matter.
+
+## Trace collection
+
+Trace collection writes resumable part files, so an interrupted run continues from
+the first missing request:
+
+```bash
+./scripts/gpu0.sh .venv/bin/python \
+  -m experiments.trace.collect_forced_routing_trace \
+  --config experiments/configs/h100_lmsys_4k256.yaml \
+  --input artifacts/data/lmsys_4k256_evaluation.jsonl \
+  --output artifacts/traces/evaluation_4k256.npz \
+  --batch-size 20
+```
+
+## Measured Bmax and runtime sweeps
+
+The real Bmax probe loads the dense model and selected residency policy, reserves
+the common 2 GiB safety margin, allocates the full peak KV cache, and executes one
+forced-routing decode step. It is distinct from the synthetic allocator probe.
+
+```bash
+./scripts/gpu0.sh .venv/bin/python \
+  -m experiments.benchmark.run_bmax_sweep \
+  --config experiments/configs/h100_lmsys_4k256.yaml \
+  --workload artifacts/data/lmsys_4k256_evaluation.jsonl \
+  --calibration-trace artifacts/traces/calibration_4k256.npz \
+  --forced-routing-trace artifacts/traces/evaluation_4k256.npz \
+  --expert-bytes 9437184 --dense-bytes 3082186752 \
+  --output-dir experiments/results/bmax
+
+./scripts/gpu0.sh .venv/bin/python \
+  -m experiments.benchmark.run_runtime_sweep \
+  --config experiments/configs/h100_lmsys_4k256.yaml \
+  --workload artifacts/data/lmsys_4k256_evaluation.jsonl \
+  --calibration-trace artifacts/traces/calibration_4k256.npz \
+  --forced-routing-trace artifacts/traces/evaluation_4k256.npz \
+  --bmax-dir experiments/results/bmax \
+  --output-dir experiments/results/runtime_at_bmax
+```
+
+For the `stream1_no_prefetch` micro-ablation, run the decode command with
+`--prefetch-depth 0`; the primary curve and sweep default to depth 1.
+Add `--timeline-events` to representative runs to record CUDA-event H2D duration,
+compute-stream exposed wait, overlap ratio, first-miss stall, and copy-engine
+utilization. It is opt-in so event instrumentation does not distort the full sweep.
+
+## Current dataset limitation
+
+The local LMSYS parquet snapshot contains 1,529 examples satisfying every strict
+4K/256 filter. The implementation therefore preserves 256 calibration and 1,273
+evaluation examples, reports a 775-example shortfall, and never duplicates or pads
+examples to manufacture the requested 2,048 evaluation rows. Exact token lengths
+and split disjointness are validated.
+
+See `--help` on each module for smaller smoke-test sizes and dry-run sweep manifests.

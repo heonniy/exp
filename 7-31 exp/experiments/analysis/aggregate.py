@@ -14,6 +14,7 @@ FIELDS = [
     "generated_tokens",
     "decode_wall_seconds",
     "decode_tokens_per_second",
+    "kv_setup",
     "throughput_gain_vs_stream2",
     "expert_h2d_fetches",
     "expert_h2d_bytes",
@@ -24,6 +25,18 @@ FIELDS = [
     "d2d_admission_copies",
     "peak_allocated_bytes",
     "policy_initialization_seconds",
+    "host_store_preload_seconds",
+    "timeline_events_enabled",
+    "total_h2d_duration_ms",
+    "exposed_h2d_stall_ms",
+    "overlapped_h2d_ms",
+    "overlap_ratio",
+    "first_miss_stall_ms",
+    "copy_engine_utilization",
+    "attention_ms",
+    "router_ms",
+    "expert_compute_ms",
+    "other_dense_host_idle_ms",
     "natural_route_mismatch_rate",
     "host_memory_mode",
     "source",
@@ -76,4 +89,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
