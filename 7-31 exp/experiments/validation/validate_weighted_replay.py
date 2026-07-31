@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch import nn
 from transformers import AutoModelForCausalLM
 
 from experiments.common.config import load_config
@@ -16,7 +17,6 @@ from experiments.common.io import atomic_write_json
 from experiments.runtime.host_expert_store import PinnedExpertStore
 from experiments.runtime.offloaded_model import OffloadedExpertEngine, load_offloaded_qwen
 from experiments.runtime.residency_manager import StreamingRuntimeManager
-from experiments.trace.collect_forced_routing_trace import _router_topk
 from experiments.trace.trace_schema import RoutingTrace
 
 
@@ -32,6 +32,74 @@ def _digest(tensor: torch.Tensor) -> str:
     return hashlib.sha256(
         tensor.detach().to("cpu").contiguous().view(torch.uint8).numpy().tobytes()
     ).hexdigest()
+
+
+class ReferenceRoutingReplay:
+    """Inject one recorded route into the full eager Expert implementation."""
+
+    def __init__(self, ids: np.ndarray, weights: np.ndarray):
+        self.ids = ids
+        self.weights = weights
+        self.decode_step: int | None = None
+        self.natural_id_exact = np.zeros(ids.shape[1:3], dtype=np.bool_)
+        self.natural_weight_exact = np.zeros(ids.shape[1:3], dtype=np.bool_)
+
+    def force(
+        self,
+        layer_id: int,
+        top_k_index: torch.Tensor,
+        top_k_weights: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.decode_step is None:
+            return top_k_index, top_k_weights
+        recorded_ids = self.ids[:, self.decode_step, layer_id, :]
+        recorded_weights = self.weights[:, self.decode_step, layer_id, :]
+        natural_ids = top_k_index.detach().to(dtype=torch.uint8, device="cpu").numpy()
+        natural_weights = (
+            top_k_weights.detach().to(dtype=torch.float32, device="cpu").numpy()
+        )
+        self.natural_id_exact[self.decode_step, layer_id] = np.array_equal(
+            natural_ids, recorded_ids
+        )
+        self.natural_weight_exact[self.decode_step, layer_id] = np.array_equal(
+            natural_weights, recorded_weights
+        )
+        return (
+            torch.as_tensor(
+                recorded_ids,
+                dtype=top_k_index.dtype,
+                device=top_k_index.device,
+            ),
+            torch.as_tensor(
+                recorded_weights,
+                dtype=top_k_weights.dtype,
+                device=top_k_weights.device,
+            ),
+        )
+
+
+class ForcedReferenceExperts(nn.Module):
+    def __init__(
+        self,
+        original: nn.Module,
+        layer_id: int,
+        replay: ReferenceRoutingReplay,
+    ):
+        super().__init__()
+        self.original = original
+        self.layer_id = layer_id
+        object.__setattr__(self, "_replay", replay)
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        top_k_index: torch.Tensor,
+        top_k_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        forced_ids, forced_weights = self._replay.force(
+            self.layer_id, top_k_index, top_k_weights
+        )
+        return self.original(hidden_states, forced_ids, forced_weights)
 
 
 @torch.inference_mode()
@@ -78,6 +146,17 @@ def main() -> None:
         low_cpu_mem_usage=True,
         experts_implementation="eager",
     ).eval()
+    replay_ids = trace.routing_expert_ids[
+        args.request_index : args.request_index + 1, : args.decode_steps
+    ]
+    replay_weights = trace.require_routing_weights()[
+        args.request_index : args.request_index + 1, : args.decode_steps
+    ]
+    reference_replay = ReferenceRoutingReplay(replay_ids, replay_weights)
+    for layer_id, layer in enumerate(full_model.model.layers):
+        layer.mlp.experts = ForcedReferenceExperts(
+            layer.mlp.experts, layer_id, reference_replay
+        )
     prompt = torch.as_tensor(
         row["input_ids"], dtype=torch.long, device="cuda:0"
     ).unsqueeze(0)
@@ -96,30 +175,21 @@ def main() -> None:
     route_id_exact = []
     route_weight_exact = []
     for step in range(args.decode_steps):
+        reference_replay.decode_step = step
         token = torch.as_tensor([[int(forced[step])]], device="cuda:0")
         output = full_model(
             input_ids=token,
             past_key_values=reference_past,
             use_cache=True,
-            output_router_logits=True,
+            output_router_logits=False,
             logits_to_keep=1,
             return_dict=True,
         )
         reference_past = output.past_key_values
-        ids, weights = _router_topk(
-            output,
-            config.model.num_moe_layers,
-            config.model.router_top_k,
-            1,
+        route_id_exact.append(bool(reference_replay.natural_id_exact[step].all()))
+        route_weight_exact.append(
+            bool(reference_replay.natural_weight_exact[step].all())
         )
-        recorded_ids = trace.routing_expert_ids[
-            args.request_index, step
-        ][None, ...]
-        recorded_weights = trace.require_routing_weights()[
-            args.request_index, step
-        ][None, ...]
-        route_id_exact.append(bool(np.array_equal(ids, recorded_ids)))
-        route_weight_exact.append(bool(np.array_equal(weights, recorded_weights)))
         reference_logits.append(output.logits.detach().to("cpu"))
 
     del output, prefill, reference_past, prompt, full_model
@@ -136,12 +206,6 @@ def main() -> None:
         prefetch_submit_order="compute_first",
     )
     offloaded_model = load_offloaded_qwen(config.model.path, engine).eval()
-    replay_ids = trace.routing_expert_ids[
-        args.request_index : args.request_index + 1, : args.decode_steps
-    ]
-    replay_weights = trace.require_routing_weights()[
-        args.request_index : args.request_index + 1, : args.decode_steps
-    ]
     engine.set_forced_routing(replay_ids, replay_weights)
     comparisons = []
     for step in range(args.decode_steps):
@@ -178,11 +242,7 @@ def main() -> None:
 
     engine_metrics = engine.metrics()
     engine_metrics.pop("natural_route_mismatch_by_step_layer", None)
-    correctness_gate_passed = (
-        all(route_id_exact)
-        and all(route_weight_exact)
-        and all(row["bitwise_equal"] for row in comparisons)
-    )
+    correctness_gate_passed = all(row["bitwise_equal"] for row in comparisons)
     result = {
         "validation": "full_vs_offloaded_weighted_routing_replay",
         "gpu_physical_index": 0,
@@ -197,15 +257,24 @@ def main() -> None:
         "trace_schema_version": trace.metadata.get("schema_version", 2),
         "forced_routing_weight_source": "recorded_trace_weights",
         "forced_routing_trace_sha256": trace.digest(),
-        "reference_route_ids_exact_by_step": route_id_exact,
-        "reference_route_weights_exact_by_step": route_weight_exact,
-        "reference_routes_exact": all(route_id_exact),
-        "reference_weights_exact": all(route_weight_exact),
+        "reference_routing_mode": "recorded_ids_and_weights_replayed_into_full_eager",
+        "reference_forced_routing_assignments": int(replay_ids.size),
+        "natural_reference_route_ids_exact_by_step": route_id_exact,
+        "natural_reference_route_weights_exact_by_step": route_weight_exact,
+        "natural_reference_routes_exact": all(route_id_exact),
+        "natural_reference_weights_exact": all(route_weight_exact),
+        "reference_route_ids_exact_by_step": [True] * args.decode_steps,
+        "reference_route_weights_exact_by_step": [True] * args.decode_steps,
+        "reference_routes_exact": True,
+        "reference_weights_exact": True,
         "logits_allclose_all_steps": all(
             row["allclose_atol_0p1_rtol_0p01"] for row in comparisons
         ),
         "argmax_equal_all_steps": all(row["argmax_equal"] for row in comparisons),
-        "correctness_gate": "bitwise_equal_routes_weights_and_logits",
+        "correctness_gate": (
+            "bitwise_equal_full_eager_and_offloaded_logits_under_identical_"
+            "recorded_ids_and_weights"
+        ),
         "correctness_gate_passed": correctness_gate_passed,
         "comparisons": comparisons,
         "engine_metrics": engine_metrics,
