@@ -159,6 +159,11 @@ def main() -> None:
     )
     parser.add_argument("--max-pinned-experts", type=int, default=16)
     parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
+    parser.add_argument(
+        "--prefetch-submit-order",
+        choices=["compute_first", "copy_first"],
+        default="compute_first",
+    )
     parser.add_argument("--timeline-events", action="store_true")
     parser.add_argument(
         "--kv-setup",
@@ -213,6 +218,7 @@ def main() -> None:
         prefill_manager,
         prefetch_depth=args.prefetch_depth,
         track_timeline=False,
+        prefetch_submit_order=args.prefetch_submit_order,
     )
     model_load_started = time.perf_counter()
     model = load_offloaded_qwen(config.model.path, prefill_engine)
@@ -269,6 +275,7 @@ def main() -> None:
         manager,
         prefetch_depth=args.prefetch_depth,
         track_timeline=args.timeline_events,
+        prefetch_submit_order=args.prefetch_submit_order,
     )
     attach_engine(model, engine)
     torch.cuda.empty_cache()
@@ -366,6 +373,9 @@ def main() -> None:
         "kv_setup_seconds": kv_setup_seconds,
         "prefill_seconds": (
             kv_setup_seconds if args.kv_setup == "real_prefill" else 0.0
+        ),
+        "prefetch_submit_order": (
+            args.prefetch_submit_order if args.prefetch_depth == 1 else None
         ),
         "host_store_preload_seconds": host_store_preload_seconds,
         "decode_host_stage_calls": (

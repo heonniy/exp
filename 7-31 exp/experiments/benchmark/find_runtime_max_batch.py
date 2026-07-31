@@ -73,7 +73,12 @@ def probe_candidate(
             permanent_method=permanent_method,
             permanent_batch_size=batch_size,
         )
-        engine = OffloadedExpertEngine(host_store, manager, prefetch_depth=1)
+        engine = OffloadedExpertEngine(
+            host_store,
+            manager,
+            prefetch_depth=1,
+            prefetch_submit_order="compute_first",
+        )
         attach_engine(model, engine)
         reserve = torch.empty(
             safety_margin_bytes, dtype=torch.uint8, device="cuda:0"
@@ -117,6 +122,7 @@ def probe_candidate(
             "h2d_copy_operations_per_fetch": metrics[
                 "h2d_copy_operations_per_fetch"
             ],
+            "prefetch_submit_order": metrics["prefetch_submit_order"],
             "forced_routing": metrics["forced_routing"],
         }
     except torch.OutOfMemoryError as error:
@@ -296,6 +302,7 @@ def main() -> None:
         "forced_routing_trace_sha256": trace.digest(),
         "host_memory_mode": "pinned_weights",
         "host_store_preload_seconds": host_store_preload_seconds,
+        "prefetch_submit_order": "compute_first",
         "probes": [probes[key] for key in sorted(probes)],
     }
     atomic_write_json(args.output, result)

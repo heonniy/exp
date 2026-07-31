@@ -1,0 +1,100 @@
+{
+  "verdict": {
+    "prefetch_has_measured_wall_time_benefit": true,
+    "selected_primary_submit_order": "compute_first",
+    "old_50_4_percent_overlap_is_valid_performance_evidence": false,
+    "old_compute_inflation_reproduced_after_single_buffer_fix": false,
+    "instrumented_timeline_runs_used_for_throughput_or_makespan": false
+  },
+  "old_superseded_three_copy_smoke": {
+    "batch_size": 1,
+    "decode_steps": 1,
+    "prefetch_off": {
+      "decode_wall_seconds": 13.911511873011477,
+      "host_prepare_seconds": 13.103532018023543,
+      "expert_compute_ms": 29.95539202541113,
+      "overlap_ratio": 0.0
+    },
+    "prefetch_on_copy_first": {
+      "decode_wall_seconds": 13.887679712002864,
+      "host_prepare_seconds": 13.064985447359504,
+      "expert_compute_ms": 99.28441645950079,
+      "overlap_ratio": 0.5041742008213023
+    },
+    "why_superseded": [
+      "three projection-level H2D copies were issued per Expert fetch",
+      "about 13 seconds of per-run host staging dominated both wall times",
+      "each mode was a separate unreplicated cold run",
+      "the 50.4 percent interval overlap produced no material wall-time reduction"
+    ]
+  },
+  "single_copy_shared_process_b1": {
+    "batch_size": 1,
+    "decode_steps": 4,
+    "repeats": 3,
+    "prefetch_off": {
+      "wall_seconds_median": 0.7275709959794767,
+      "wall_seconds_mad": 0.004655138007365167
+    },
+    "prefetch_on_copy_first": {
+      "wall_seconds_median": 0.6722011620004196,
+      "wall_seconds_mad": 0.0054758969927206635,
+      "wall_reduction_vs_off": 0.07610231068174556
+    },
+    "prefetch_on_compute_first": {
+      "wall_seconds_median": 0.6709779299853835,
+      "wall_seconds_mad": 0.0035845550009980798,
+      "wall_reduction_vs_off": 0.07778356518721041
+    },
+    "all_logits_digests_match": true
+  },
+  "single_copy_shared_process_b40_uninstrumented": {
+    "batch_size": 40,
+    "decode_steps": 4,
+    "warmups": 2,
+    "repeats": 9,
+    "prefetch_off": {
+      "wall_seconds_median": 5.345026323018828,
+      "wall_seconds_mad": 0.023213524982566014,
+      "wall_seconds_min": 5.303453013009857,
+      "wall_seconds_max": 5.368939515989041
+    },
+    "prefetch_on_copy_first": {
+      "wall_seconds_median": 4.6784904599771835,
+      "wall_seconds_mad": 0.008769086038228124,
+      "wall_seconds_min": 4.660904969990952,
+      "wall_seconds_max": 4.9159920449892525,
+      "wall_reduction_vs_off": 0.12470207306017356
+    },
+    "prefetch_on_compute_first": {
+      "wall_seconds_median": 4.699063195992494,
+      "wall_seconds_mad": 0.025371038995217532,
+      "wall_seconds_min": 4.673165675019845,
+      "wall_seconds_max": 4.810822313011158,
+      "wall_reduction_vs_off": 0.12085312363092338
+    },
+    "compute_first_wall_delta_vs_copy_first": 0.004397302119412805,
+    "submit_order_difference_interpretation": "smaller than run-to-run dispersion",
+    "all_logits_digests_match": true
+  },
+  "instrumentation_finding": {
+    "b40_decode_steps": 4,
+    "timeline_events_per_expert": true,
+    "uninstrumented_wall_seconds_range": [
+      4.660904969990952,
+      5.368939515989041
+    ],
+    "instrumented_wall_seconds_range": [
+      8.994239970983006,
+      37.637353324011434
+    ],
+    "interpretation": "per-Expert CUDA event profiling is materially intrusive at B=40 and is retained only as a separately labeled breakdown profile"
+  },
+  "primary_sources": [
+    "experiments/results/prefetch_revalidation_single_buffer.json",
+    "experiments/results/prefetch_revalidation_single_buffer_b40.json",
+    "experiments/results/prefetch_revalidation_single_buffer_b40_wall.json",
+    "experiments/results/offloaded_stream1_static_timeline_smoke.json",
+    "experiments/results/offloaded_stream2_static_timeline_smoke.json"
+  ]
+}

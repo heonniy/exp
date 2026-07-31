@@ -51,6 +51,7 @@ class OffloadedExpertEngine:
         dtype: torch.dtype = torch.bfloat16,
         prefetch_depth: int = 1,
         track_timeline: bool = False,
+        prefetch_submit_order: str = "compute_first",
     ):
         self.host_store = host_store
         self.manager = manager
@@ -65,6 +66,7 @@ class OffloadedExpertEngine:
                 self.manager.on_resident_hit,
                 self.manager.on_transient_complete,
                 track_timeline,
+                prefetch_submit_order,
             )
         elif prefetch_depth == 0:
             self.transient_buffer = TransientSingleBuffer(
@@ -188,6 +190,11 @@ class OffloadedExpertEngine:
             **self.host_store.metrics(),
             "global_lru": False,
             "expert_execution_order": "ascending_expert_id",
+            "prefetch_submit_order": (
+                self.executor.prefetch_submit_order
+                if hasattr(self.executor, "prefetch_submit_order")
+                else "not_applicable"
+            ),
             "grouped_gemm": False,
             "batched_gemm": False,
             "forced_routing": self.forced_routing is not None,

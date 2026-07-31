@@ -113,10 +113,18 @@ evaluation routing trace SHA-256 is:
 
 ### Prefetch correctness
 
-- Depth 0 / one slot has zero measured compute-copy interval overlap.
-- Depth 1 / two slots overlaps 71.78 ms, or 50.4%, in the timeline smoke.
-- Both paths produce the same final-logits digest, supporting execution
-  correctness across the micro-ablation.
+- The historical 50.4% overlap smoke is superseded: it used three H2D copies per
+  Expert, was dominated by about 13.1 seconds of host staging, and did not reduce
+  wall time materially.
+- With one contiguous H2D copy per Expert, shared pinned weights, warm-ups, and
+  rotated order, prefetch reduces uninstrumented B=1 median wall time by 7.8%.
+- At the physical common B=40 comparison, nine repeats show 12.5% reduction for
+  copy-first and 12.1% for compute-first versus OFF. Their 0.44% difference is
+  below run-to-run dispersion; compute-first is the primary executor default.
+- Per-Expert timeline events are intrusive at B=40 (9.0--37.6 seconds versus
+  4.7--5.4 seconds uninstrumented). Never use an instrumented profile's wall
+  time, throughput, or overlap ratio as the primary performance result.
+- All corrected paths produce identical final-logits digests.
 
 ## 5. Conclusions that are not yet supported
 
@@ -129,6 +137,9 @@ does not yet contain all of the following primary measurements:
 - Exact fixed-workload makespan for every policy, including the final partial wave.
 - Nsight Systems validation for k=0, the eventual optimal k, and k=128.
 - Representative pinned-weight timeline results beyond the integration smokes.
+
+The prefetch ablation itself is now complete. The remaining timeline requirement
+refers to the separately labeled component profiles for the policy/k sweep.
 
 The official completion comparison uses the first 1,200 eligible evaluation rows.
 Never describe it as a 1,273- or 2,048-request completion run.

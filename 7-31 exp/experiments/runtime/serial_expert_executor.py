@@ -61,6 +61,7 @@ class SerialExpertExecutor:
             Callable[[int, int, ExpertSlot, TransientDoubleBuffer], None] | None
         ) = None,
         track_timeline: bool = False,
+        prefetch_submit_order: str = "compute_first",
     ):
         self.double_buffer = double_buffer
         self.host_weights = host_weights
@@ -70,6 +71,9 @@ class SerialExpertExecutor:
             lambda _layer, _expert, _slot, _buffer: None
         )
         self.track_timeline = track_timeline
+        if prefetch_submit_order not in {"compute_first", "copy_first"}:
+            raise ValueError("invalid prefetch submit order")
+        self.prefetch_submit_order = prefetch_submit_order
         self.compute_stream = torch.cuda.Stream(device=0)
         self.copy_stream = torch.cuda.Stream(device=0)
         self.timeline_origin = None
@@ -176,7 +180,9 @@ class SerialExpertExecutor:
                 if staged
                 else first_future_nonresident(active, position, resident)
             )
-            if future is not None:
+            def stage_future() -> None:
+                if future is None:
+                    return
                 if current_slot is not None:
                     prefetch_slot = self.double_buffer.other(current_slot)
                 else:
@@ -199,6 +205,9 @@ class SerialExpertExecutor:
                 self.fetches += 1
                 self.h2d_bytes += prefetch_slot.bytes
                 staged[future] = prefetch_slot
+
+            if self.prefetch_submit_order == "copy_first":
+                stage_future()
 
             with torch.cuda.stream(self.compute_stream):
                 if current_slot is not None:
@@ -229,6 +238,8 @@ class SerialExpertExecutor:
                     current_slot.record_compute_done(self.compute_stream)
                 elif resident_expert.slot is not None:
                     resident_expert.slot.record_compute_done(self.compute_stream)
+            if self.prefetch_submit_order == "compute_first":
+                stage_future()
             self.expert_executions += 1
             if current_slot is None:
                 self.on_resident_hit(layer_id, expert_id)
@@ -278,6 +289,7 @@ class SerialExpertExecutor:
             "compute_streams": 1,
             "copy_streams": 1,
             "prefetch_depth": 1,
+            "prefetch_submit_order": self.prefetch_submit_order,
             "transient_slots": 2,
             "host_prepare_seconds": self.host_prepare_seconds,
             "timeline_events_enabled": self.track_timeline,

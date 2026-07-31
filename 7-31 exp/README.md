@@ -166,9 +166,11 @@ Bmax; each wave records its exact batch size and decode time.
 
 For the `stream1_no_prefetch` micro-ablation, run the decode command with
 `--prefetch-depth 0`; the primary curve and sweep default to depth 1.
-Add `--timeline-events` to representative runs to record CUDA-event H2D duration,
-compute-stream exposed wait, overlap ratio, first-miss stall, and copy-engine
-utilization. It is opt-in so event instrumentation does not distort the full sweep.
+The primary depth-1 executor uses `--prefetch-submit-order compute_first`.
+Add `--timeline-events` only to separately labeled representative profiles to
+record CUDA-event H2D duration, compute-stream exposed wait, overlap ratio,
+first-miss stall, and copy-engine utilization. Per-Expert events are intrusive
+at B=40 and must not be enabled for throughput or fixed-workload makespan runs.
 Nsight Systems capture is also constrained to GPU 0 and stored under the project:
 
 ```bash

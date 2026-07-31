@@ -64,6 +64,11 @@ def main() -> None:
         default="static_zero",
     )
     parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
+    parser.add_argument(
+        "--prefetch-submit-order",
+        choices=["compute_first", "copy_first"],
+        default="compute_first",
+    )
     parser.add_argument("--timeline-events", action="store_true")
     parser.add_argument(
         "--permanent-method",
@@ -119,6 +124,8 @@ def main() -> None:
             args.kv_setup,
             "--prefetch-depth",
             str(args.prefetch_depth),
+            "--prefetch-submit-order",
+            args.prefetch_submit_order,
             "--permanent-method",
             args.permanent_method,
             "--output",
@@ -152,6 +159,7 @@ def main() -> None:
             "decode_steps": args.decode_steps or config.dataset.output_tokens,
             "kv_setup": args.kv_setup,
             "prefetch_depth": args.prefetch_depth,
+            "prefetch_submit_order": args.prefetch_submit_order,
             "timeline_events": args.timeline_events,
             "permanent_method": args.permanent_method,
             "dry_run": args.dry_run,

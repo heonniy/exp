@@ -108,6 +108,11 @@ def main() -> None:
     parser.add_argument("--requests", type=int)
     parser.add_argument("--cold-each-wave", action="store_true")
     parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
+    parser.add_argument(
+        "--prefetch-submit-order",
+        choices=["compute_first", "copy_first"],
+        default="compute_first",
+    )
     parser.add_argument("--timeline-events", action="store_true")
     parser.add_argument("--max-pinned-experts", type=int, default=6144)
     parser.add_argument("--output", type=Path, required=True)
@@ -184,6 +189,7 @@ def main() -> None:
             manager,
             prefetch_depth=args.prefetch_depth,
             track_timeline=args.timeline_events,
+            prefetch_submit_order=args.prefetch_submit_order,
         )
         attach_engine(model, engine)
 
@@ -376,6 +382,9 @@ def main() -> None:
         "waves": len(waves),
         "partial_wave_batch_size": requests % args.batch_size,
         "quota_state": "cold_each_wave" if args.cold_each_wave else "warm_across_waves",
+        "prefetch_submit_order": (
+            args.prefetch_submit_order if args.prefetch_depth == 1 else None
+        ),
         "kv_setup": "static_zero",
         "generated_tokens": generated,
         "fixed_workload_decode_makespan_seconds": decode_makespan,
@@ -436,7 +445,10 @@ def main() -> None:
             routing_mismatch_totals[key] for key in sorted(routing_mismatch_totals)
         ],
         "timeline_events_enabled": args.timeline_events,
-        **timing_totals,
+        **{
+            name: value if args.timeline_events else None
+            for name, value in timing_totals.items()
+        },
         "attention_ms": attention_total_ms if args.timeline_events else None,
         "router_ms": router_total_ms if args.timeline_events else None,
         "other_dense_host_idle_ms": (

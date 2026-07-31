@@ -93,14 +93,28 @@ copies. Natural routing differed from the recorded forced trace for 8.53% of
 assignments before the forced-ID override; effective execution used the recorded
 IDs for every policy.
 
-The Static-KV one-token timeline micro-ablation used pinned staging only as a
-functional check, so its 13-second wall time is dominated by CPU staging. The
-GPU-event interval result was:
+The historical Static-KV one-token timeline micro-ablation used projection-level
+pinned staging only as a functional check. Its 13-second wall time was dominated
+by CPU staging, and its three-copy transfer granularity is now superseded. The
+old GPU-event interval result was:
 
 | Prefetch depth | Slots | H2D duration | Compute-copy overlap | Overlap ratio |
 |---:|---:|---:|---:|---:|
 | 0 | 1 | 138.39 ms | 0.00 ms | 0.0% |
 | 1 | 2 | 142.38 ms | 71.78 ms | 50.4% |
+
+That 50.4% value produced no meaningful wall-time improvement and must not be
+used as performance evidence. The single-buffer shared-process revalidation is:
+
+| Batch | Repeats | OFF | ON copy-first | ON compute-first |
+|---:|---:|---:|---:|---:|
+| 1 | 3 | 727.57 ms | 672.20 ms | 670.98 ms |
+| 40 | 9 | 5.345 s | 4.678 s | 4.699 s |
+
+At B=40, prefetch reduces uninstrumented median wall time by 12.1--12.5%.
+Per-Expert timeline events materially perturb this workload, so full-workload
+throughput is measured without them and breakdowns are stored as separate
+instrumented profiles.
 
 Both paths produced the same final-logits SHA-256:
 `cc101da1e5b190768df8a9524554f77c9a9a0879e3717ea271c078331dd1fafe`.

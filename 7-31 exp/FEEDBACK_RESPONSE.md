@@ -94,8 +94,13 @@ intermediate k, the resumable GPU-0 runner performs:
 2. 1,200-request × 256-step workload at measured Bmax;
 3. the same workload at common physical B=40;
 4. Expert H2D, exposed stall, Expert compute, attention, router, and residual
-   timing breakdown;
+   timing breakdown in a separately labeled two-wave instrumented profile;
 5. cold-start, KV setup, and steady decode makespan as separate fields.
+
+The 1,200-request throughput and makespan runs do not enable per-Expert CUDA
+timeline events. Those events materially perturb B=40 execution, so the common
+B=40 two-wave profile is evidence for component diagnosis only and is excluded
+from throughput and makespan comparisons.
 
 Run it with:
 
@@ -121,3 +126,33 @@ operations, with the same final-logits digest as the pre-change execution.
 All pre-change executor timing/overlap measurements are superseded. Cache trace
 counts and HBM byte accounting remain structurally useful, but runtime timing is
 remeasured by the completion run.
+
+## 6. Prefetch performance revalidation
+
+The old 50.4% overlap value did not establish a performance benefit. Its
+prefetch-OFF and ON wall times were 13.912 and 13.888 seconds, respectively,
+while roughly 13.1 seconds in each run came from projection-level host staging.
+It was also one unreplicated cold run per mode using three H2D copies per Expert.
+
+The corrected benchmark reuses one model and one layer-slab pinned host store,
+issues one H2D copy per Expert, warms every mode, rotates execution order, and
+checks identical final-logits digests. Uninstrumented wall-time results are:
+
+| Batch | Repeats | OFF | ON copy-first | ON compute-first |
+|---:|---:|---:|---:|---:|
+| 1 | 3 | 727.57 ms | 672.20 ms (-7.61%) | 670.98 ms (-7.78%) |
+| 40 | 9 | 5.345 s | 4.678 s (-12.47%) | 4.699 s (-12.09%) |
+
+The old 3.3x compute increase is not reproduced after the single-buffer and
+shared-process corrections. At B=40, per-Expert event profiling itself expanded
+wall time from roughly 4.7--5.4 seconds to 9.0--37.6 seconds. Therefore overlap,
+compute, and exposed-stall event totals are labeled instrumented diagnostics and
+never substituted for uninstrumented wall performance.
+
+Both ON submission orders have a real wall-time benefit. Their B=40 median
+difference is only 0.44%, smaller than run-to-run dispersion. `compute_first` is
+the primary default because it submits the current Expert compute before the
+future H2D and avoids giving DMA priority over the work on the critical path.
+
+Tracked summary:
+`experiments/results/prefetch_revalidation_summary.json`.

@@ -40,10 +40,12 @@ def _fixed_command(
     k: int,
     batch_size: int,
     requests: int,
+    decode_steps: int,
     output: Path,
     permanent_method: str,
+    timeline_events: bool,
 ) -> list[str]:
-    return [
+    command = [
         sys.executable,
         "-m",
         "experiments.benchmark.run_fixed_workload",
@@ -62,19 +64,23 @@ def _fixed_command(
         "--batch-size",
         str(batch_size),
         "--decode-steps",
-        "256",
+        str(decode_steps),
         "--requests",
         str(requests),
         "--prefetch-depth",
         "1",
+        "--prefetch-submit-order",
+        "compute_first",
         "--permanent-method",
         permanent_method,
-        "--timeline-events",
         "--max-pinned-experts",
         "6144",
         "--output",
         str(output),
     ]
+    if timeline_events:
+        command.append("--timeline-events")
+    return command
 
 
 def _write_manifest(path: Path, payload: dict, runs: list[dict]) -> None:
@@ -127,7 +133,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--phase",
-        choices=["all", "bmax", "runtime_at_bmax", "common_batch"],
+        choices=[
+            "all",
+            "bmax",
+            "runtime_at_bmax",
+            "common_batch",
+            "profile_common_batch",
+        ],
         default="all",
     )
     parser.add_argument(
@@ -164,7 +176,7 @@ def main() -> None:
             [
                 sys.executable,
                 "-m",
-                "experiments.benchmark.run_bmax_sweep",
+                "experiments.benchmark.run_shared_bmax_sweep",
                 "--config",
                 str(args.config),
                 "--workload",
@@ -208,7 +220,14 @@ def main() -> None:
         "common_batch_size": args.common_batch_size,
         "permanent_method": args.permanent_method,
         "quota_runtime_control": "ascending_id_always_admit_lru",
-        "timeline_events": True,
+        "performance_timeline_events": False,
+        "profile_timeline_events": True,
+        "profile_requests": args.common_batch_size * 2,
+        "profile_interpretation": (
+            "instrumented two-wave common-batch breakdown; excluded from "
+            "throughput and makespan comparisons"
+        ),
+        "prefetch_submit_order": "compute_first",
         "cold_start_and_steady_state_separated": True,
         "forced_routing_trace": str(args.forced_routing_trace),
         "forced_routing_trace_sha256": trace.digest(),
@@ -233,8 +252,10 @@ def main() -> None:
                 k=k,
                 batch_size=batch_size,
                 requests=args.requests,
+                decode_steps=256,
                 output=output,
                 permanent_method=args.permanent_method,
+                timeline_events=False,
             )
             run = {
                 "mode": "measured_bmax",
@@ -276,8 +297,10 @@ def main() -> None:
                 k=k,
                 batch_size=args.common_batch_size,
                 requests=args.requests,
+                decode_steps=256,
                 output=output,
                 permanent_method=args.permanent_method,
+                timeline_events=False,
             )
             run = {
                 "mode": "common_fixed_batch",
@@ -286,6 +309,59 @@ def main() -> None:
                 "batch_size": args.common_batch_size,
                 "measured_bmax": measured_bmax,
                 "physical_fixed_batch_feasible": True,
+                "output": str(output),
+                "command": command,
+            }
+            all_runs.append(run)
+            _write_manifest(args.output_dir / "manifest.json", manifest_base, all_runs)
+            if not output.exists():
+                _run(command)
+                _write_manifest(
+                    args.output_dir / "manifest.json", manifest_base, all_runs
+                )
+
+    if args.phase in {"all", "profile_common_batch"}:
+        output_dir = args.output_dir / (
+            f"profile_common_b{args.common_batch_size}"
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        profile_requests = args.common_batch_size * 2
+        for policy, k in configurations(
+            config.runtime_k, config.model.num_experts_per_layer
+        ):
+            measured_bmax = resolve_batch_size(None, bmax_dir, policy, k)
+            if args.common_batch_size > measured_bmax:
+                raise ValueError(
+                    f"common B={args.common_batch_size} exceeds measured Bmax "
+                    f"{measured_bmax} for {policy} k={k}"
+                )
+            output = output_dir / (
+                f"{policy}_k{k}_b{args.common_batch_size}_n{profile_requests}.json"
+            )
+            command = _fixed_command(
+                config=args.config,
+                workload=args.workload,
+                calibration_trace=args.calibration_trace,
+                forced_routing_trace=args.forced_routing_trace,
+                policy=policy,
+                k=k,
+                batch_size=args.common_batch_size,
+                requests=profile_requests,
+                decode_steps=256,
+                output=output,
+                permanent_method=args.permanent_method,
+                timeline_events=True,
+            )
+            run = {
+                "mode": "instrumented_profile_common_fixed_batch",
+                "policy": policy,
+                "k": k,
+                "batch_size": args.common_batch_size,
+                "requests": profile_requests,
+                "waves": 2,
+                "decode_steps": 256,
+                "timeline_events": True,
+                "excluded_from_throughput_comparison": True,
                 "output": str(output),
                 "command": command,
             }
