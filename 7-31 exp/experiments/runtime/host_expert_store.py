@@ -83,6 +83,24 @@ class PinnedExpertStore:
             self._cache.popitem(last=False)
         return tensors
 
+    def preload_all(self, num_layers: int, num_experts: int) -> float:
+        required = num_layers * num_experts
+        if not self.pin_weights:
+            raise ValueError("preload_all requires pinned_weights mode")
+        if self.max_pinned_experts < required:
+            raise ValueError(
+                f"host cache holds {self.max_pinned_experts} Experts; need {required}"
+            )
+        started = time.perf_counter()
+        for layer_id in range(num_layers):
+            for expert_id in range(num_experts):
+                self.get(layer_id, expert_id)
+            print(
+                f"host-pinned Experts {len(self._cache)}/{required}",
+                flush=True,
+            )
+        return time.perf_counter() - started
+
     def metrics(self) -> dict:
         return {
             "host_stage_calls": self.stage_calls,

@@ -12,6 +12,7 @@ from experiments.common.config import load_config
 from experiments.common.gpu import require_gpu0
 from experiments.common.io import atomic_write_json
 from experiments.runtime.host_expert_store import PinnedExpertStore
+from experiments.runtime.kv_cache import make_static_kv_cache
 from experiments.runtime.offloaded_model import (
     EXPERT_SHAPES,
     OffloadedExpertEngine,
@@ -43,6 +44,7 @@ def _manager(
     policy: str,
     k: int,
     num_layers: int,
+    num_experts: int,
     host_store: PinnedExpertStore,
     calibration_trace: RoutingTrace | None,
 ) -> tuple[object, float]:
@@ -68,6 +70,16 @@ def _manager(
             EXPERT_SHAPES,
             torch.bfloat16,
         )
+    elif policy == "full_resident":
+        if k != num_experts:
+            raise ValueError("full_resident requires k=num_experts")
+        manager = PermanentRuntimeManager(
+            [range(num_experts) for _ in range(num_layers)],
+            EXPERT_SHAPES,
+            torch.bfloat16,
+            host_store,
+            name="full_resident",
+        )
     else:
         raise ValueError(f"unknown policy: {policy}")
     torch.cuda.synchronize()
@@ -83,7 +95,9 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--workload", type=Path, required=True)
     parser.add_argument(
-        "--policy", choices=["stream2", "permanent_k", "quota_lru_k"], required=True
+        "--policy",
+        choices=["stream2", "permanent_k", "quota_lru_k", "full_resident"],
+        required=True,
     )
     parser.add_argument("--k", type=int, required=True)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -95,6 +109,16 @@ def main() -> None:
         help="Force identical token/layer top-k Expert IDs across policies.",
     )
     parser.add_argument("--max-pinned-experts", type=int, default=16)
+    parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
+    parser.add_argument(
+        "--kv-setup",
+        choices=["real_prefill", "static_zero"],
+        default="real_prefill",
+        help=(
+            "real_prefill constructs KV from the 4K prompt; static_zero "
+            "preallocates the full peak KV fixture outside the decode timer"
+        ),
+    )
     parser.add_argument(
         "--host-memory-mode",
         choices=["pinned_weights", "pinned_staging"],
@@ -124,48 +148,71 @@ def main() -> None:
         args.max_pinned_experts,
         pin_weights=args.host_memory_mode == "pinned_weights",
     )
+    host_store_preload_seconds = 0.0
+    if args.host_memory_mode == "pinned_weights":
+        host_store_preload_seconds = host_store.preload_all(
+            config.model.num_moe_layers,
+            config.model.num_experts_per_layer,
+        )
 
     # Prefill uses streaming only to construct real KV. Its cache state and
     # counters are discarded before the decode-only timer.
     prefill_manager = StreamingRuntimeManager()
-    prefill_engine = OffloadedExpertEngine(host_store, prefill_manager)
+    prefill_engine = OffloadedExpertEngine(
+        host_store, prefill_manager, prefetch_depth=args.prefetch_depth
+    )
     model_load_started = time.perf_counter()
     model = load_offloaded_qwen(config.model.path, prefill_engine)
     model_load_seconds = time.perf_counter() - model_load_started
-    input_ids = torch.tensor(
-        [row["input_ids"] for row in examples],
-        dtype=torch.long,
-        device="cuda:0",
-    )
-    prefill_started = time.perf_counter()
-    with torch.inference_mode():
-        prefill = model(
-            input_ids=input_ids,
-            use_cache=True,
-            logits_to_keep=1,
-            output_router_logits=False,
-            return_dict=True,
+    kv_setup_started = time.perf_counter()
+    if args.kv_setup == "real_prefill":
+        input_ids = torch.tensor(
+            [row["input_ids"] for row in examples],
+            dtype=torch.long,
+            device="cuda:0",
         )
-    past = prefill.past_key_values
-    del prefill, input_ids
+        with torch.inference_mode():
+            prefill = model(
+                input_ids=input_ids,
+                use_cache=True,
+                logits_to_keep=1,
+                output_router_logits=False,
+                return_dict=True,
+            )
+        past = prefill.past_key_values
+        del prefill, input_ids
+    else:
+        past = make_static_kv_cache(
+            model,
+            batch_size=args.batch_size,
+            max_cache_length=config.peak_sequence_length,
+            initial_sequence_length=config.dataset.input_tokens,
+        )
     torch.cuda.synchronize()
-    prefill_seconds = time.perf_counter() - prefill_started
+    kv_setup_seconds = time.perf_counter() - kv_setup_started
 
     calibration = (
         RoutingTrace.load(args.calibration_trace)
         if args.calibration_trace is not None
         else None
     )
+    # Drop bootstrap transient slots before allocating policy residency.
+    for layer in model.model.layers:
+        object.__setattr__(layer.mlp.experts, "_engine", None)
+    del prefill_engine
+    torch.cuda.empty_cache()
     manager, policy_initialization_seconds = _manager(
         args.policy,
         args.k,
         config.model.num_moe_layers,
+        config.model.num_experts_per_layer,
         host_store,
         calibration,
     )
-    engine = OffloadedExpertEngine(host_store, manager)
+    engine = OffloadedExpertEngine(
+        host_store, manager, prefetch_depth=args.prefetch_depth
+    )
     attach_engine(model, engine)
-    del prefill_engine
     torch.cuda.empty_cache()
 
     expected = None
@@ -221,7 +268,12 @@ def main() -> None:
         "decode_ms_per_generated_token": wall_seconds * 1000 / generated,
         "policy_initialization_seconds": policy_initialization_seconds,
         "model_load_seconds": model_load_seconds,
-        "prefill_seconds": prefill_seconds,
+        "kv_setup": args.kv_setup,
+        "kv_setup_seconds": kv_setup_seconds,
+        "prefill_seconds": (
+            kv_setup_seconds if args.kv_setup == "real_prefill" else 0.0
+        ),
+        "host_store_preload_seconds": host_store_preload_seconds,
         "decode_host_stage_calls": (
             host_after["host_stage_calls"] - host_before["host_stage_calls"]
         ),

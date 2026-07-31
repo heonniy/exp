@@ -18,7 +18,9 @@ from experiments.runtime.serial_expert_executor import (
     RoutedExpertTokens,
     SerialExpertExecutor,
 )
+from experiments.runtime.serial_no_prefetch_executor import SerialNoPrefetchExecutor
 from experiments.runtime.transient_double_buffer import TransientDoubleBuffer
+from experiments.runtime.transient_single_buffer import TransientSingleBuffer
 
 
 EXPERT_SHAPES = {
@@ -47,19 +49,34 @@ class OffloadedExpertEngine:
         host_store: PinnedExpertStore,
         manager: RuntimeResidencyManager,
         dtype: torch.dtype = torch.bfloat16,
+        prefetch_depth: int = 1,
     ):
         self.host_store = host_store
         self.manager = manager
-        self.double_buffer = TransientDoubleBuffer(
-            EXPERT_SHAPES, dtype=dtype, device="cuda:0"
-        )
-        self.executor = SerialExpertExecutor(
-            self.double_buffer,
-            self.host_store.get,
-            self.manager.lookup,
-            self.manager.on_resident_hit,
-            self.manager.on_transient_complete,
-        )
+        if prefetch_depth == 1:
+            self.transient_buffer = TransientDoubleBuffer(
+                EXPERT_SHAPES, dtype=dtype, device="cuda:0"
+            )
+            self.executor = SerialExpertExecutor(
+                self.transient_buffer,
+                self.host_store.get,
+                self.manager.lookup,
+                self.manager.on_resident_hit,
+                self.manager.on_transient_complete,
+            )
+        elif prefetch_depth == 0:
+            self.transient_buffer = TransientSingleBuffer(
+                EXPERT_SHAPES, dtype=dtype, device="cuda:0"
+            )
+            self.executor = SerialNoPrefetchExecutor(
+                self.transient_buffer,
+                self.host_store.get,
+                self.manager.lookup,
+                self.manager.on_resident_hit,
+                self.manager.on_transient_complete,
+            )
+        else:
+            raise ValueError("only prefetch_depth 0 or 1 is implemented")
         self.capture_routes = False
         self.captured_routes: list[tuple[int, np.ndarray]] = []
         self.forced_routing: np.ndarray | None = None

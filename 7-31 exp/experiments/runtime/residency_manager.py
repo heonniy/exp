@@ -71,7 +71,11 @@ class PermanentRuntimeManager(RuntimeResidencyManager):
         tensor_shapes: dict[str, tuple[int, ...]],
         dtype: torch.dtype,
         host_store: PinnedExpertStore,
+        name: str = "permanent_k",
     ):
+        if name not in {"permanent_k", "full_resident"}:
+            raise ValueError(f"invalid permanent residency name: {name}")
+        self.name = name
         selected = [tuple(int(value) for value in layer) for layer in selections]
         self.k = len(selected[0]) if selected else 0
         if any(len(layer) != self.k for layer in selected):
