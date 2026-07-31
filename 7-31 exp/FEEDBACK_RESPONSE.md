@@ -36,6 +36,20 @@ global cache. The real-runtime primary Quota curve remains the original
 ascending-ID, always-admit policy so it can be interpreted alongside the
 sensitivity controls rather than silently changing the baseline.
 
+The full 1,200-request B=40 control completed with the following hit rates:
+
+| k | Permanent union | Ascending admit | Resident-first | Miss bypass | Random order |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 7.87% | 0.00% | 6.92% | 6.98% | 0.32–0.33% |
+| 32 | 31.15% | ~0.00% | 27.96% | 27.99% | 5.17% |
+| 64 | 60.62% | 0.09% | 56.22% | 55.53% | 23.37% |
+| 96 | 86.14% | 16.38% | 84.91% | 81.20% | 64.29–64.30% |
+
+The three random seeds have little within-control variance, while changing the
+ordering/admission rule changes hit rate by tens of percentage points. This
+confirms the review concern rather than treating the original Quota curve as a
+policy-independent result.
+
 Implementation: `experiments/runtime/policies.py`,
 `experiments/trace/simulator.py`, and
 `experiments/benchmark/run_residency_sweep.py`.

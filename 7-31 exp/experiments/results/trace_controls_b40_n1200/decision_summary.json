@@ -1,0 +1,43 @@
+{
+  "batch_size": 40,
+  "requests": 1200,
+  "decode_steps": 256,
+  "derived_trace_sha256": "f821a09f35a84aad83706543c526c5cc7b362131cfc978c3871cf3930619dd18",
+  "permanent_method": "batch_step_union_presence",
+  "stream2_fetches": 37263419,
+  "hit_rate_by_control": {
+    "k8": {
+      "permanent": 0.07869739489014682,
+      "ascending_always_admit": 0.0,
+      "resident_hit_first": 0.06920865205632365,
+      "miss_bypass": 0.06980097558949167,
+      "window_frequency": 0.0,
+      "random_seed_range": [0.003240201871975301, 0.003261080256752608]
+    },
+    "k32": {
+      "permanent": 0.31149307582323565,
+      "ascending_always_admit": 2.9519567165857756e-7,
+      "resident_hit_first": 0.2796159150076916,
+      "miss_bypass": 0.27991594115397733,
+      "window_frequency": 2.9519567165857756e-7,
+      "random_seed_range": [0.05167719580428194, 0.05171251194100037]
+    },
+    "k64": {
+      "permanent": 0.6062384935746234,
+      "ascending_always_admit": 0.0008976363655734328,
+      "resident_hit_first": 0.5621856384139093,
+      "miss_bypass": 0.5553031513291896,
+      "window_frequency": 0.0009639480478160096,
+      "random_seed_range": [0.2337055008291107, 0.23373413480926158]
+    },
+    "k96": {
+      "permanent": 0.8613679007822659,
+      "ascending_always_admit": 0.16376648100916344,
+      "resident_hit_first": 0.849056979983506,
+      "miss_bypass": 0.8120017382194586,
+      "window_frequency": 0.1863749807820909,
+      "random_seed_range": [0.6429129597582015, 0.6429916964946238]
+    }
+  },
+  "decision": "Quota-LRU effectiveness is dominated by access-order and admission semantics at B=40. The original ascending always-admit result must not be generalized to resident-hit-first or bypass controls. Random seed variance is small within the random-order control, but the gap between ordering strategies is large."
+}
