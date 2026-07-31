@@ -170,6 +170,7 @@ def main() -> None:
     )
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
+    trace.require_serial_reference()
     if [str(value) for value in trace.conversation_ids[: args.batch_size]] != [
         str(row["conversation_id"]) for row in examples
     ]:

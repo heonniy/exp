@@ -170,6 +170,7 @@ def main() -> None:
         raise ValueError("physical Bmax validation must run all configured tokens")
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
+    trace.require_serial_reference()
     calibration = RoutingTrace.load(args.calibration_trace)
     runs = list(configurations(config.runtime_k, config.model.num_experts_per_layer))
     provisional = {}

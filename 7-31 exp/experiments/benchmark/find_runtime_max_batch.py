@@ -228,6 +228,7 @@ def main() -> None:
     examples = _read_examples(args.workload, upper)
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
+    trace.require_serial_reference()
     workload_ids = [str(row["conversation_id"]) for row in examples]
     trace_ids = [str(value) for value in trace.conversation_ids[:upper]]
     if workload_ids != trace_ids:

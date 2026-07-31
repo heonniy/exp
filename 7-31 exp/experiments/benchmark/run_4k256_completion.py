@@ -173,6 +173,7 @@ def main() -> None:
         raise ValueError("common batch size must be positive")
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
+    trace.require_serial_reference()
     if args.requests > trace.num_requests:
         raise ValueError("validation request count exceeds the forced trace")
 

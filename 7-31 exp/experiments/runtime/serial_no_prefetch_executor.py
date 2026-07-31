@@ -161,6 +161,7 @@ class SerialNoPrefetchExecutor:
             "expert_h2d_copy_operations": self.fetches,
             "h2d_copy_operations_per_fetch": 1,
             "gpu_expert_layout": "single_contiguous_buffer_with_projection_views",
+            "expert_gate_up_execution": "single_zero_copy_gate_up_projection",
             "expert_h2d_bytes": self.h2d_bytes,
             "expert_executions": self.expert_executions,
             "compute_streams": 1,

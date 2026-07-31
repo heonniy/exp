@@ -66,6 +66,10 @@ def test_expert_projections_pack_into_one_buffer_with_zero_copy_views() -> None:
     assert all(view.untyped_storage().data_ptr() == packed.untyped_storage().data_ptr() for view in views.values())
     for name in source:
         assert torch.equal(views[name], source[name])
+    assert torch.equal(
+        views["gate_up_proj"],
+        torch.cat([source["gate_proj"], source["up_proj"]], dim=0),
+    )
 
 
 def test_packed_views_produce_identical_mlp_output() -> None:
@@ -81,6 +85,12 @@ def test_packed_views_produce_identical_mlp_output() -> None:
         {"gate_proj": (3, 5), "up_proj": (3, 5), "down_proj": (5, 3)},
     )
     inputs = torch.randn(7, 5, generator=generator)
-    expected = SerialExpertExecutor._mlp(inputs, source)
+    full_style = {
+        **source,
+        "gate_up_proj": torch.cat(
+            [source["gate_proj"], source["up_proj"]], dim=0
+        ),
+    }
+    expected = SerialExpertExecutor._mlp(inputs, full_style)
     actual = SerialExpertExecutor._mlp(inputs, views)
     assert torch.equal(actual, expected)

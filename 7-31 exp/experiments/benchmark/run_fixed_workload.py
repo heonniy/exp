@@ -123,6 +123,7 @@ def main() -> None:
     require_gpu0(torch)
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
+    trace.require_serial_reference()
     requests = args.requests or trace.num_requests
     if not 0 < requests <= trace.num_requests:
         raise ValueError("requests is outside the forced trace")

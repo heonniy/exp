@@ -149,6 +149,7 @@ def load_model(config: ExperimentConfig):
         dtype=dtype,
         device_map={"": 0},
         low_cpu_mem_usage=True,
+        experts_implementation="eager",
     )
     model.eval()
     model.config.output_router_logits = True
@@ -228,6 +229,7 @@ def main() -> None:
             "num_experts": config.model.num_experts_per_layer,
             "gpu_physical_index": 0,
             "source_split": str(args.input),
+            "reference_experts_implementation": "eager",
         },
     )
     print(f"wrote {args.output}")

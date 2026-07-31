@@ -54,6 +54,7 @@ def main() -> None:
     require_gpu0(torch)
     trace = RoutingTrace.load(args.trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
+    trace.require_serial_reference()
     if not 0 <= args.request_index < trace.num_requests:
         raise ValueError("request index is outside the trace")
     if not 0 < args.decode_steps <= trace.output_tokens:
@@ -75,6 +76,7 @@ def main() -> None:
         dtype=dtype,
         device_map={"": 0},
         low_cpu_mem_usage=True,
+        experts_implementation="eager",
     ).eval()
     prompt = torch.as_tensor(
         row["input_ids"], dtype=torch.long, device="cuda:0"
@@ -174,6 +176,13 @@ def main() -> None:
             }
         )
 
+    engine_metrics = engine.metrics()
+    engine_metrics.pop("natural_route_mismatch_by_step_layer", None)
+    correctness_gate_passed = (
+        all(route_id_exact)
+        and all(route_weight_exact)
+        and all(row["bitwise_equal"] for row in comparisons)
+    )
     result = {
         "validation": "full_vs_offloaded_weighted_routing_replay",
         "gpu_physical_index": 0,
@@ -183,6 +192,8 @@ def main() -> None:
         "input_tokens": len(row["input_ids"]),
         "decode_steps": args.decode_steps,
         "kv_setup": "real_full_model_prefill_cache",
+        "reference_experts_implementation": "eager",
+        "offloaded_experts_implementation": "serial_per_expert",
         "trace_schema_version": trace.metadata.get("schema_version", 2),
         "forced_routing_weight_source": "recorded_trace_weights",
         "forced_routing_trace_sha256": trace.digest(),
@@ -194,11 +205,15 @@ def main() -> None:
             row["allclose_atol_0p1_rtol_0p01"] for row in comparisons
         ),
         "argmax_equal_all_steps": all(row["argmax_equal"] for row in comparisons),
+        "correctness_gate": "bitwise_equal_routes_weights_and_logits",
+        "correctness_gate_passed": correctness_gate_passed,
         "comparisons": comparisons,
-        "engine_metrics": engine.metrics(),
+        "engine_metrics": engine_metrics,
     }
     atomic_write_json(args.output, result)
     print(json.dumps(result, indent=2))
+    if not correctness_gate_passed:
+        raise RuntimeError("weighted replay correctness gate failed")
 
 
 if __name__ == "__main__":

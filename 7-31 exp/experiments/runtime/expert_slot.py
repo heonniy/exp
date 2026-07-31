@@ -11,13 +11,28 @@ def contiguous_projection_views(
     tensor_shapes: Mapping[str, tuple[int, ...]],
 ) -> dict[str, torch.Tensor]:
     views = {}
+    offsets = {}
     offset = 0
     for name, shape in tensor_shapes.items():
         elements = int(torch.Size(shape).numel())
+        offsets[name] = offset
         views[name] = buffer[offset : offset + elements].view(shape)
         offset += elements
     if offset != buffer.numel():
         raise ValueError("projection shapes do not cover the Expert buffer")
+    gate_shape = tensor_shapes.get("gate_proj")
+    up_shape = tensor_shapes.get("up_proj")
+    if gate_shape is not None and up_shape is not None:
+        gate_elements = int(torch.Size(gate_shape).numel())
+        if (
+            len(gate_shape) == 2
+            and tuple(gate_shape) == tuple(up_shape)
+            and offsets["up_proj"] == offsets["gate_proj"] + gate_elements
+        ):
+            start = offsets["gate_proj"]
+            views["gate_up_proj"] = buffer[
+                start : start + 2 * gate_elements
+            ].view(gate_shape[0] * 2, gate_shape[1])
     return views
 
 
@@ -92,7 +107,7 @@ class ExpertSlot:
                     "Expert H2D source must be one contiguous flat Expert buffer"
                 )
         else:
-            if set(source) != set(self.tensors):
+            if set(source) != set(self.tensor_shapes):
                 raise ValueError("source tensors do not match the Expert slot layout")
             self.ensure_host_staging()
             copy_source = self._host_staging

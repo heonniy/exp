@@ -95,8 +95,13 @@ class SerialExpertExecutor:
 
     @staticmethod
     def _mlp(x: torch.Tensor, weights: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        gate = functional.linear(x, weights["gate_proj"])
-        up = functional.linear(x, weights["up_proj"])
+        if "gate_up_proj" in weights:
+            gate, up = functional.linear(x, weights["gate_up_proj"]).chunk(
+                2, dim=-1
+            )
+        else:
+            gate = functional.linear(x, weights["gate_proj"])
+            up = functional.linear(x, weights["up_proj"])
         hidden = functional.silu(gate) * up
         return functional.linear(hidden, weights["down_proj"])
 
@@ -284,6 +289,7 @@ class SerialExpertExecutor:
             "expert_h2d_copy_operations": self.fetches,
             "h2d_copy_operations_per_fetch": 1,
             "gpu_expert_layout": "single_contiguous_buffer_with_projection_views",
+            "expert_gate_up_execution": "single_zero_copy_gate_up_projection",
             "expert_h2d_bytes": self.h2d_bytes,
             "expert_executions": self.expert_executions,
             "compute_streams": 1,

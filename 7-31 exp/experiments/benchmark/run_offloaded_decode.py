@@ -291,6 +291,7 @@ def main() -> None:
     if args.forced_routing_trace is not None:
         trace = RoutingTrace.load(args.forced_routing_trace)
         trace.validate(config.model.num_experts_per_layer, require_weights=True)
+        trace.require_serial_reference()
         expected_ids = [str(value) for value in trace.conversation_ids[: args.batch_size]]
         workload_ids = [str(row["conversation_id"]) for row in examples]
         if expected_ids != workload_ids:

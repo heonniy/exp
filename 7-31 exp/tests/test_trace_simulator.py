@@ -27,7 +27,10 @@ def synthetic_trace() -> RoutingTrace:
         conversation_ids=np.asarray(["a", "b"]),
         forced_output_ids=np.asarray([[10, 11], [12, 13]], dtype=np.int32),
         routing_expert_ids=routing,
-        metadata={"num_experts": 4},
+        metadata={
+            "num_experts": 4,
+            "reference_experts_implementation": "eager",
+        },
         routing_expert_weights=np.full(routing.shape, 0.5, dtype=np.float32),
     )
 
@@ -148,3 +151,21 @@ def test_legacy_trace_is_readable_but_rejected_for_weighted_replay(
         assert "legacy ID-only" in str(error)
     else:
         raise AssertionError("legacy trace unexpectedly passed weighted validation")
+
+
+def test_weighted_trace_requires_eager_serial_reference() -> None:
+    trace = synthetic_trace()
+    assert trace.require_serial_reference() is trace.routing_expert_weights
+    wrong = RoutingTrace(
+        conversation_ids=trace.conversation_ids,
+        forced_output_ids=trace.forced_output_ids,
+        routing_expert_ids=trace.routing_expert_ids,
+        routing_expert_weights=trace.routing_expert_weights,
+        metadata={"num_experts": 4, "reference_experts_implementation": "grouped_mm"},
+    )
+    try:
+        wrong.require_serial_reference()
+    except ValueError as error:
+        assert "eager serial" in str(error)
+    else:
+        raise AssertionError("grouped-mm trace unexpectedly passed serial gate")

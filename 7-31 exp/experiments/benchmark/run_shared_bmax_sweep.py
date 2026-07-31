@@ -143,6 +143,7 @@ def main() -> None:
 
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
+    trace.require_serial_reference()
     token_ids, routing, routing_weights = _validated_inputs(
         args.workload, trace, max(search_upper.values())
     )

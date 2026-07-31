@@ -52,6 +52,15 @@ class RoutingTrace:
             )
         return self.routing_expert_weights
 
+    def require_serial_reference(self) -> np.ndarray:
+        weights = self.require_routing_weights()
+        if self.metadata.get("reference_experts_implementation") != "eager":
+            raise ValueError(
+                "routing trace was not collected with the eager serial Expert "
+                "reference implementation"
+            )
+        return weights
+
     def validate(self, num_experts: int = 128, *, require_weights: bool = False) -> None:
         routing = self.routing_expert_ids
         output = self.forced_output_ids
