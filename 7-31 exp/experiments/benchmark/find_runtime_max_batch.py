@@ -256,6 +256,11 @@ def main() -> None:
         "k": args.k,
         **accounting.as_dict(),
         "measured_bmax": low,
+        "search_upper_batch": upper,
+        "user_max_batch_cap": args.max_batch,
+        "search_truncated_below_theoretical": (
+            upper < accounting.theoretical_bmax
+        ),
         "forced_routing_trace": str(args.forced_routing_trace),
         "forced_routing_trace_sha256": trace.digest(),
         "host_memory_mode": "pinned_weights",

@@ -148,6 +148,19 @@ For the `stream1_no_prefetch` micro-ablation, run the decode command with
 Add `--timeline-events` to representative runs to record CUDA-event H2D duration,
 compute-stream exposed wait, overlap ratio, first-miss stall, and copy-engine
 utilization. It is opt-in so event instrumentation does not distort the full sweep.
+Nsight Systems capture is also constrained to GPU 0 and stored under the project:
+
+```bash
+./scripts/nsys_gpu0.sh stream2_k0 \
+  .venv/bin/python -m experiments.benchmark.run_offloaded_decode \
+  --config experiments/configs/h100_lmsys_4k256.yaml \
+  --workload artifacts/data/lmsys_4k256_evaluation.jsonl \
+  --policy stream2 --k 0 --batch-size 1 --decode-steps 4 \
+  --kv-setup static_zero --host-memory-mode pinned_weights \
+  --max-pinned-experts 6144 \
+  --forced-routing-trace artifacts/traces/evaluation_4k256.npz \
+  --output experiments/results/nsys_stream2_k0.json
+```
 
 ## Current dataset limitation
 
