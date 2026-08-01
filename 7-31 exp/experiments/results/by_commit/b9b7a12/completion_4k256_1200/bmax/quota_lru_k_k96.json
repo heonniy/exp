@@ -1,0 +1,129 @@
+{
+  "boundary_batches_required": [
+    69,
+    70,
+    71
+  ],
+  "boundary_closed": true,
+  "command": "'/home/hwlee/MoE-Exp/7-31 exp/.venv/bin/python' '/home/hwlee/MoE-Exp/7-31 exp/experiments/benchmark/validate_bmax_256.py' --config experiments/configs/h100_lmsys_4k256.yaml --workload artifacts/data/lmsys_4k256_evaluation.jsonl --calibration-trace artifacts/traces/by_commit/840e332/calibration_4k256_n256_weighted_eager.npz --forced-routing-trace artifacts/traces/by_commit/840e332/evaluation_4k256_n1200_weighted_eager.npz --provisional-dir experiments/results/by_commit/b9b7a12/completion_4k256_1200/bmax_one_step_provisional --output-dir experiments/results/by_commit/b9b7a12/completion_4k256_1200/bmax --decode-steps 256 --permanent-method batch_step_union_presence",
+  "config": "h100_lmsys_4k256",
+  "cublas_workspaces_cleared_between_probes": true,
+  "decode_steps": 256,
+  "dense_resident_bytes": 3082186752,
+  "fixed_workspace_bytes": 0,
+  "forced_routing_trace": "artifacts/traces/by_commit/840e332/evaluation_4k256_n1200_weighted_eager.npz",
+  "forced_routing_trace_sha256": "a70b55758382914f445a08ff8a58e955ec75ad7ab1444899af753df19fdc4c6e",
+  "git_sha": "b9b7a12af52d8e987dd26bf43d09b0cc6ffa2bf4",
+  "gpu_physical_index": 0,
+  "host_memory_mode": "pinned_weights",
+  "host_store_preload_scope": "shared_bmax_sweep",
+  "host_store_preload_seconds": 223.65065049697296,
+  "k": 96,
+  "kv_budget_bytes": 36293283840,
+  "kv_bytes_per_request": 427819008,
+  "measured_bmax": 70,
+  "permanent_method": null,
+  "persistent_expert_bytes": 43486543872,
+  "policy": "quota_lru_k",
+  "prefetch_submit_order": "compute_first",
+  "probe_mode": "real_runtime_static_peak_kv_full_256_step_boundary",
+  "probes": [
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "batch_size": 69,
+          "decode_steps_completed": 256,
+          "elapsed_seconds": 438.26912617098424,
+          "expert_h2d_copy_operations": 1349974,
+          "expert_h2d_fetches": 1349974,
+          "feasible": true,
+          "h2d_copy_operations_per_fetch": 1,
+          "peak_allocated_bytes": 83265231360,
+          "peak_reserved_bytes": 83309363200,
+          "policy_initialization_seconds": 0.29117160601890646
+        }
+      ],
+      "batch_size": 69,
+      "decode_steps_completed": 256,
+      "elapsed_seconds": 438.26912617098424,
+      "expert_h2d_copy_operations": 1349974,
+      "expert_h2d_fetches": 1349974,
+      "feasible": true,
+      "h2d_copy_operations_per_fetch": 1,
+      "peak_allocated_bytes": 83265231360,
+      "peak_reserved_bytes": 83309363200,
+      "policy_initialization_seconds": 0.29117160601890646,
+      "transient_oom_recovered": false
+    },
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "batch_size": 70,
+          "decode_steps_completed": 256,
+          "elapsed_seconds": 438.0693365269981,
+          "expert_h2d_copy_operations": 1350887,
+          "expert_h2d_fetches": 1350887,
+          "feasible": true,
+          "h2d_copy_operations_per_fetch": 1,
+          "peak_allocated_bytes": 83764694528,
+          "peak_reserved_bytes": 83812679680,
+          "policy_initialization_seconds": 0.2970025410177186
+        }
+      ],
+      "batch_size": 70,
+      "decode_steps_completed": 256,
+      "elapsed_seconds": 438.0693365269981,
+      "expert_h2d_copy_operations": 1350887,
+      "expert_h2d_fetches": 1350887,
+      "feasible": true,
+      "h2d_copy_operations_per_fetch": 1,
+      "peak_allocated_bytes": 83764694528,
+      "peak_reserved_bytes": 83812679680,
+      "policy_initialization_seconds": 0.2970025410177186,
+      "transient_oom_recovered": false
+    },
+    {
+      "attempt_count": 2,
+      "attempts": [
+        {
+          "batch_size": 71,
+          "decode_steps_completed": 0,
+          "elapsed_seconds": 0.4506544719915837,
+          "error": "CUDA out of memory. Tried to allocate 2.36 GiB. GPU 0 has a total capacity of 79.19 GiB of which 2.18 GiB is free. Including non-PyTorch memory, this process has 76.81 GiB memory in use. Of the allocated memory 76.07 GiB is allocated by PyTorch, and 15.43 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+          "feasible": false,
+          "peak_allocated_bytes": 81676275712,
+          "peak_reserved_bytes": 81692459008
+        },
+        {
+          "batch_size": 71,
+          "decode_steps_completed": 0,
+          "elapsed_seconds": 0.7225515230093151,
+          "error": "CUDA out of memory. Tried to allocate 2.36 GiB. GPU 0 has a total capacity of 79.19 GiB of which 2.18 GiB is free. Including non-PyTorch memory, this process has 76.81 GiB memory in use. Of the allocated memory 76.07 GiB is allocated by PyTorch, and 15.43 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+          "feasible": false,
+          "peak_allocated_bytes": 81676275712,
+          "peak_reserved_bytes": 81692459008
+        }
+      ],
+      "batch_size": 71,
+      "decode_steps_completed": 0,
+      "elapsed_seconds": 0.7225515230093151,
+      "error": "CUDA out of memory. Tried to allocate 2.36 GiB. GPU 0 has a total capacity of 79.19 GiB of which 2.18 GiB is free. Including non-PyTorch memory, this process has 76.81 GiB memory in use. Of the allocated memory 76.07 GiB is allocated by PyTorch, and 15.43 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "feasible": false,
+      "peak_allocated_bytes": 81676275712,
+      "peak_reserved_bytes": 81692459008,
+      "transient_oom_recovered": false
+    }
+  ],
+  "provisional_one_step_bmax": 70,
+  "safety_margin_bytes": 2147483648,
+  "search_truncated_below_theoretical": false,
+  "search_upper_batch": 84,
+  "theoretical_bmax": 84,
+  "timestamp": "2026-08-01T03:26:48.486833+00:00",
+  "total_hbm_bytes": 85028372480,
+  "trace_sha256": "a70b55758382914f445a08ff8a58e955ec75ad7ab1444899af753df19fdc4c6e",
+  "transient_expert_bytes": 18874368,
+  "user_max_batch_cap": null
+}
