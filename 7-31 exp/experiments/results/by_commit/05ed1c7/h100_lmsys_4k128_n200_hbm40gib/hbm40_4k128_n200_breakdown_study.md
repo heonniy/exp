@@ -15,7 +15,7 @@ wave까지 생겨 E2E는 653.552→697.520 s로 6.73% 악화된다.
 k=80에서는 H2D 감소 자체는 실제다. k=0 대비 raw H2D/token은 47.8%, exposed
 H2D/token은 68.5%, copy event를 기다리는 compute-stream wait/token은 85.7%
 감소한다. 그러나 Bmax=2로 인한 낮은 GPU 효율 때문에 Expert 실행/token은
-10.05배, attention/token은 10.81배, router projection/token은 96.7배, 아직
+10.05배, attention/token은 10.81배, router module/token은 96.7배, 아직
 분리되지 않은 dense/dispatch/host-sync/idle residual은 8.06배가 된다. 그 결과
 100 waves가 필요하고 E2E는 k=0의 3.64배다.
 
@@ -62,7 +62,7 @@ token 수로 정규화한 값이다. batch가 서로 다르므로 raw one-wave �
 비교하지 않고 `ms/generated token`을 사용한다. `Profile wall`만 additive wall
 partition이며, raw H2D·overlap·H2D wait는 서로 및 compute와 겹칠 수 있다.
 
-| k | Bmax | Waves | Raw H2D | Exposed H2D | H2D-compute overlap | H2D wait | Expert execution | Attention | Router projection | Residual | Profile wall |
+| k | Bmax | Waves | Raw H2D | Exposed H2D | H2D-compute overlap | H2D wait | Expert execution | Attention | Router module | Residual | Profile wall |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 0 | 60 | 4 | 15.255 | 12.015 | 3.240 | 10.936 | 3.382 | 1.289 | 0.035 | 7.016 | 23.737 |
 | 2 | 59 | 4 | 15.225 | 11.911 | 3.314 | 10.841 | 3.470 | 1.299 | 0.035 | 7.333 | 24.049 |
@@ -86,7 +86,7 @@ Prefill profile은 `us/prompt token` 단위다. prompt token 수가 크기 때�
 decode와 단위가 다르다. Permanent buffer는 prefill부터 사용되지만, Bmax가
 작아지면서 같은 200 requests를 더 많은 wave로 나누는 비용이 생긴다.
 
-| k | Raw H2D | Exposed H2D | H2D overlap | H2D wait | Expert execution | Attention | Router projection | Residual | Profile wall |
+| k | Raw H2D | Exposed H2D | H2D overlap | H2D wait | Expert execution | Attention | Router module | Residual | Profile wall |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 0 | 4.461 | 0.478 | 89.29% | 0.385 | 24.154 | 15.346 | 0.765 | 7.045 | 47.787 |
 | 2 | 4.459 | 0.466 | 89.55% | 0.377 | 24.202 | 15.962 | 0.756 | 7.083 | 48.469 |
@@ -128,8 +128,9 @@ throughput, Expert fetch 수는 `wave_latency.csv`의 151개 row에 보존했다
 ## 측정 정의: 현재 정확히 분리되는 것과 그렇지 않은 것
 
 - `Attention`은 각 layer의 `self_attn` module 전후 CUDA event 합이다.
-- `Router projection`은 각 layer의 `mlp.gate` module 전후 CUDA event 합이다.
-  routing bookkeeping이나 token dispatch는 포함하지 않는다.
+- `Router module`은 각 layer의 `mlp.gate` 전후 CUDA event 합이다. linear router
+  logits, softmax, top-k 선택과 top-k probability 정규화를 포함한다. 그 이후의
+  forced-route override, mismatch 검사와 token dispatch는 포함하지 않는다.
 - 현재 이름이 `expert_compute_ms`인 event는 순수 GEMM이 아니다. H2D wait가 끝난
   뒤 `index_select`부터 Expert MLP, routing-weight multiply, `index_add_`까지를
   포함한다. 이 보고서에서는 정확한 의미를 반영해 `Expert execution`으로 썼다.
@@ -140,7 +141,7 @@ throughput, Expert fetch 수는 `wave_latency.csv`의 151개 row에 보존했다
 - `H2D wait`는 compute stream의 `wait_event(copy_done)` 앞뒤 CUDA event 차이다.
   H2D dependency 때문에 stream이 진행하지 못한 직접적인 wait이지만, 전체 host
   synchronization 시간과 같지는 않다.
-- additive partition은 `Attention + Router projection + Expert execution +
+- additive partition은 `Attention + Router module + Expert execution +
   Exposed H2D + Residual = profile wall`이다. Raw H2D, overlap, H2D wait를 여기에
   다시 더하면 중복 계산이다.
 - `Residual`에는 dense/non-MoE layer, 아직 분리되지 않은 routing/dispatch host

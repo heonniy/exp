@@ -25,7 +25,7 @@ PHASES = {
 
 ADDITIVE_COMPONENTS = (
     "attention",
-    "router_projection",
+    "router_module",
     "expert_execution",
     "exposed_h2d",
     "residual_dense_dispatch_host_sync_idle",
@@ -62,7 +62,7 @@ def _profile_phase(value: dict, phase: str) -> dict:
     )
     first_miss_stall_ms = float(value[f"{prefix}first_miss_stall_ms"])
     attention_ms = float(value[f"{prefix}attention_ms"])
-    router_projection_ms = float(value[f"{prefix}router_ms"])
+    router_module_ms = float(value[f"{prefix}router_ms"])
     expert_execution_ms = float(value[f"{prefix}expert_compute_ms"])
     residual_ms = float(value[f"{prefix}other_dense_host_idle_ms"])
 
@@ -72,7 +72,7 @@ def _profile_phase(value: dict, phase: str) -> dict:
     )
     additive_total_ms = (
         attention_ms
-        + router_projection_ms
+        + router_module_ms
         + expert_execution_ms
         + exposed_h2d_ms
         + residual_ms
@@ -91,7 +91,7 @@ def _profile_phase(value: dict, phase: str) -> dict:
         "compute_stream_h2d_wait": compute_stream_h2d_wait_ms,
         "first_miss_stall": first_miss_stall_ms,
         "attention": attention_ms,
-        "router_projection": router_projection_ms,
+        "router_module": router_module_ms,
         "expert_execution": expert_execution_ms,
         "residual_dense_dispatch_host_sync_idle": residual_ms,
     }
@@ -109,7 +109,7 @@ def _profile_phase(value: dict, phase: str) -> dict:
         _close(
             non_h2d_wall_ms,
             attention_ms
-            + router_projection_ms
+            + router_module_ms
             + expert_execution_ms
             + residual_ms,
         ),
@@ -276,14 +276,14 @@ def _plot_breakdown(path: Path, rows: list[dict]) -> None:
 
     colors = {
         "attention": "#4c78a8",
-        "router_projection": "#72b7b2",
+        "router_module": "#72b7b2",
         "expert_execution": "#f58518",
         "exposed_h2d": "#e45756",
         "residual_dense_dispatch_host_sync_idle": "#b279a2",
     }
     labels = {
         "attention": "Attention",
-        "router_projection": "Router projection",
+        "router_module": "Router module (linear+softmax+top-k)",
         "expert_execution": "Expert exec. (gather+MLP+scatter)",
         "exposed_h2d": "Exposed H2D",
         "residual_dense_dispatch_host_sync_idle": "Residual dense/dispatch/sync/idle",
@@ -458,7 +458,7 @@ def _decode_only_rows(rows: list[dict]) -> list[dict]:
         "decode_non_h2d_wall_ms",
         "decode_expert_execution_ms",
         "decode_attention_ms",
-        "decode_router_projection_ms",
+        "decode_router_module_ms",
         "decode_residual_dense_dispatch_host_sync_idle_ms",
         "decode_profile_wall_ms",
         "decode_raw_h2d_us_per_token",
@@ -469,7 +469,7 @@ def _decode_only_rows(rows: list[dict]) -> list[dict]:
         "decode_non_h2d_wall_us_per_token",
         "decode_expert_execution_us_per_token",
         "decode_attention_us_per_token",
-        "decode_router_projection_us_per_token",
+        "decode_router_module_us_per_token",
         "decode_residual_dense_dispatch_host_sync_idle_us_per_token",
         "decode_profile_wall_us_per_token",
         "runtime_decode_seconds",
@@ -581,8 +581,8 @@ def _plot_decode_only(path: Path, rows: list[dict]) -> None:
         ),
         ("decode_attention_us_per_token", "Attention", "#72b7b2", ".."),
         (
-            "decode_router_projection_us_per_token",
-            "Router projection",
+            "decode_router_module_us_per_token",
+            "Router module",
             "#eeca3b",
             "xx",
         ),
@@ -743,10 +743,10 @@ def main() -> None:
             "decode_attention_us_per_token"
         ]
         / baseline["decode_attention_us_per_token"],
-        "k80_router_projection_per_token_ratio_vs_k0": largest[
-            "decode_router_projection_us_per_token"
+        "k80_router_module_per_token_ratio_vs_k0": largest[
+            "decode_router_module_us_per_token"
         ]
-        / baseline["decode_router_projection_us_per_token"],
+        / baseline["decode_router_module_us_per_token"],
         "k80_residual_per_token_ratio_vs_k0": largest[
             "decode_residual_dense_dispatch_host_sync_idle_us_per_token"
         ]
@@ -765,14 +765,14 @@ def main() -> None:
             "performance_wall_time": "uninstrumented runtime_at_bmax; exact for the 200-request makespan and every wave",
             "component_timing": "intrusive profiles_at_bmax; exactly one Bmax wave per k and normalized by phase-token count",
             "attention": "CUDA event time around each self_attn module",
-            "router_projection": "CUDA event time around each MLP gate projection only; dispatch is not included",
+            "router_module": "CUDA event time around each MLP gate module: linear logits, softmax, top-k selection, and optional top-k normalization; forced-route override and token dispatch are not included",
             "expert_execution": "CUDA event time from token index_select through Expert MLP and weighted index_add; not pure GEMM",
             "raw_h2d": "sum of single-contiguous-buffer Expert H2D copy intervals",
             "overlapped_h2d": "intersection of Expert H2D intervals and expert-execution intervals",
             "exposed_h2d": "raw_h2d minus overlapped_h2d",
             "compute_stream_h2d_wait": "CUDA event time across compute-stream wait_event(copy_done); a direct H2D dependency wait, not total host synchronization",
-            "residual_dense_dispatch_host_sync_idle": "profile wall minus attention, router projection, expert execution, and exposed H2D; includes dense layers, unisolated dispatch, host work, explicit stream synchronize, and idle",
-            "additivity_warning": "raw/overlapped H2D and compute-stream H2D wait overlap other categories; only attention + router projection + expert execution + exposed H2D + residual is an additive wall partition",
+            "residual_dense_dispatch_host_sync_idle": "profile wall minus attention, router module, expert execution, and exposed H2D; includes dense layers, unisolated dispatch, host work, explicit stream synchronize, and idle",
+            "additivity_warning": "raw/overlapped H2D and compute-stream H2D wait overlap other categories; only attention + router module + expert execution + exposed H2D + residual is an additive wall partition",
             "decode_fetch_miss": "an active non-Permanent Expert execution requiring one packed transient H2D fetch; expert_executions equals fetch misses plus Permanent hits",
         },
         "diagnosis": diagnosis,

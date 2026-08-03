@@ -33,7 +33,7 @@ def test_profile_phase_keeps_h2d_nonadditive_and_closes_wall_partition() -> None
         result[f"{name}_wall_pct"]
         for name in (
             "attention",
-            "router_projection",
+            "router_module",
             "expert_execution",
             "exposed_h2d",
             "residual_dense_dispatch_host_sync_idle",
