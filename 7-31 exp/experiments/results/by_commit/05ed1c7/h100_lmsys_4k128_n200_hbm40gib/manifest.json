@@ -1,6 +1,6 @@
 {
   "bmax_dir": "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_prefill_decode",
-  "command": "'/home/hwlee/MoE-Exp/7-31 exp/.venv/bin/python' '/home/hwlee/MoE-Exp/7-31 exp/experiments/benchmark/run_reduced_hbm_completion.py' --config experiments/configs/h100_lmsys_4k128_n200_hbm40.yaml --workload artifacts/data/4k128_n200/evaluation_4k128_n200.jsonl --calibration-trace artifacts/traces/by_commit/840e332/calibration_4k128_n256_weighted_eager.npz --evaluation-trace artifacts/traces/by_commit/840e332/evaluation_4k128_n200_weighted_eager.npz --expert-bytes 9437184 --dense-bytes 3082186752 --output-dir experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib --phase runtime",
+  "command": "'/home/hwlee/MoE-Exp/7-31 exp/.venv/bin/python' '/home/hwlee/MoE-Exp/7-31 exp/experiments/benchmark/run_reduced_hbm_completion.py' --config experiments/configs/h100_lmsys_4k128_n200_hbm40.yaml --workload artifacts/data/4k128_n200/evaluation_4k128_n200.jsonl --calibration-trace artifacts/traces/by_commit/840e332/calibration_4k128_n256_weighted_eager.npz --evaluation-trace artifacts/traces/by_commit/840e332/evaluation_4k128_n200_weighted_eager.npz --expert-bytes 9437184 --dense-bytes 3082186752 --output-dir experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib --phase profile",
   "commands": [
     {
       "command": [
@@ -22,7 +22,7 @@
         "--batch-size",
         "60",
         "--requests",
-        "200",
+        "60",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -38,10 +38,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/stream2_k0_b60_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/stream2_k0_b60_n60.json",
+        "--timeline-events"
       ],
       "k": 0,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "stream2"
     },
     {
@@ -64,7 +65,7 @@
         "--batch-size",
         "59",
         "--requests",
-        "200",
+        "59",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -80,10 +81,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/permanent_k_k2_b59_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/permanent_k_k2_b59_n59.json",
+        "--timeline-events"
       ],
       "k": 2,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "permanent_k"
     },
     {
@@ -106,7 +108,7 @@
         "--batch-size",
         "57",
         "--requests",
-        "200",
+        "57",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -122,10 +124,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/permanent_k_k4_b57_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/permanent_k_k4_b57_n57.json",
+        "--timeline-events"
       ],
       "k": 4,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "permanent_k"
     },
     {
@@ -148,7 +151,7 @@
         "--batch-size",
         "54",
         "--requests",
-        "200",
+        "54",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -164,10 +167,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/permanent_k_k8_b54_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/permanent_k_k8_b54_n54.json",
+        "--timeline-events"
       ],
       "k": 8,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "permanent_k"
     },
     {
@@ -190,7 +194,7 @@
         "--batch-size",
         "48",
         "--requests",
-        "200",
+        "48",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -206,10 +210,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/permanent_k_k16_b48_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/permanent_k_k16_b48_n48.json",
+        "--timeline-events"
       ],
       "k": 16,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "permanent_k"
     },
     {
@@ -232,7 +237,7 @@
         "--batch-size",
         "37",
         "--requests",
-        "200",
+        "37",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -248,10 +253,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/permanent_k_k32_b37_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/permanent_k_k32_b37_n37.json",
+        "--timeline-events"
       ],
       "k": 32,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "permanent_k"
     },
     {
@@ -274,7 +280,7 @@
         "--batch-size",
         "25",
         "--requests",
-        "200",
+        "25",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -290,10 +296,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/permanent_k_k48_b25_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/permanent_k_k48_b25_n25.json",
+        "--timeline-events"
       ],
       "k": 48,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "permanent_k"
     },
     {
@@ -316,7 +323,7 @@
         "--batch-size",
         "13",
         "--requests",
-        "200",
+        "13",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -332,10 +339,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/permanent_k_k64_b13_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/permanent_k_k64_b13_n13.json",
+        "--timeline-events"
       ],
       "k": 64,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "permanent_k"
     },
     {
@@ -358,7 +366,7 @@
         "--batch-size",
         "2",
         "--requests",
-        "200",
+        "2",
         "--decode-steps",
         "128",
         "--kv-setup",
@@ -374,10 +382,11 @@
         "--permanent-method",
         "batch_step_union_presence",
         "--output",
-        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/permanent_k_k80_b2_n200.json"
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/permanent_k_k80_b2_n2.json",
+        "--timeline-events"
       ],
       "k": 80,
-      "phase": "runtime",
+      "phase": "profile",
       "policy": "permanent_k"
     }
   ],
@@ -386,7 +395,7 @@
   "dry_run": false,
   "effective_hbm_gib": 40.0,
   "evaluation_requests": 200,
-  "git_sha": "7489f71d4b1e7240fac0018f94f93a8c0c27b08a",
+  "git_sha": "fb88e56b0f8a6ebba6b08c3392f138a3e8d532aa",
   "input_tokens": 4096,
   "policies": [
     "stream2",
@@ -408,6 +417,6 @@
     96,
     128
   ],
-  "timestamp": "2026-08-03T06:42:18.243299+00:00",
+  "timestamp": "2026-08-03T07:17:07.556027+00:00",
   "trace_sha256": null
 }

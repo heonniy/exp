@@ -1,5 +1,11 @@
 # Analysis Agent Guide
 
+> **Latest reduced-HBM study:** For the user-requested 40 GiB, 4K prefill,
+> 128-token decode, 200-request Permanent-versus-2-streaming experiment, start
+> with `H100_40GIB_4K128_N200_ANALYSIS_AGENT_GUIDE.md`. The 4K/256 material
+> below remains a historical/full-scale study and must not be mixed into that
+> reduced-scope decision table.
+
 This document tells a downstream analysis agent what evidence to inspect, how to
 interpret it, and which conclusions are not yet supported.
 
