@@ -1,0 +1,80 @@
+{
+  "bmax_dir": "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_prefill_decode",
+  "command": "'/home/hwlee/MoE-Exp/7-31 exp/.venv/bin/python' '/home/hwlee/MoE-Exp/7-31 exp/experiments/benchmark/run_reduced_hbm_completion.py' --config experiments/configs/h100_lmsys_4k128_n200_hbm40.yaml --workload artifacts/data/4k128_n200/evaluation_4k128_n200.jsonl --calibration-trace artifacts/traces/by_commit/840e332/calibration_4k128_n256_weighted_eager.npz --evaluation-trace artifacts/traces/by_commit/840e332/evaluation_4k128_n200_weighted_eager.npz --expert-bytes 9437184 --dense-bytes 3082186752 --output-dir experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib --phase bmax",
+  "commands": [
+    {
+      "command": [
+        "/home/hwlee/MoE-Exp/7-31 exp/.venv/bin/python",
+        "-m",
+        "experiments.benchmark.run_shared_bmax_sweep",
+        "--config",
+        "experiments/configs/h100_lmsys_4k128_n200_hbm40.yaml",
+        "--workload",
+        "artifacts/data/4k128_n200/evaluation_4k128_n200.jsonl",
+        "--calibration-trace",
+        "artifacts/traces/by_commit/840e332/calibration_4k128_n256_weighted_eager.npz",
+        "--forced-routing-trace",
+        "artifacts/traces/by_commit/840e332/evaluation_4k128_n200_weighted_eager.npz",
+        "--expert-bytes",
+        "9437184",
+        "--dense-bytes",
+        "3082186752",
+        "--output-dir",
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_one_step_provisional"
+      ],
+      "phase": "bmax_provisional"
+    },
+    {
+      "command": [
+        "/home/hwlee/MoE-Exp/7-31 exp/.venv/bin/python",
+        "-m",
+        "experiments.benchmark.validate_bmax_256",
+        "--config",
+        "experiments/configs/h100_lmsys_4k128_n200_hbm40.yaml",
+        "--workload",
+        "artifacts/data/4k128_n200/evaluation_4k128_n200.jsonl",
+        "--calibration-trace",
+        "artifacts/traces/by_commit/840e332/calibration_4k128_n256_weighted_eager.npz",
+        "--forced-routing-trace",
+        "artifacts/traces/by_commit/840e332/evaluation_4k128_n200_weighted_eager.npz",
+        "--provisional-dir",
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_one_step_provisional",
+        "--output-dir",
+        "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_prefill_decode",
+        "--decode-steps",
+        "128",
+        "--include-prefill"
+      ],
+      "phase": "bmax_boundary"
+    }
+  ],
+  "config": "h100_lmsys_4k128_n200_hbm40gib",
+  "decode_steps": 128,
+  "dry_run": false,
+  "effective_hbm_gib": 40.0,
+  "evaluation_requests": 200,
+  "git_sha": "05ed1c718a062f97086a8ec356a63da82d19907b",
+  "input_tokens": 4096,
+  "policies": [
+    "stream2",
+    "permanent_k"
+  ],
+  "profile_dir": "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax",
+  "provisional_dir": "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_one_step_provisional",
+  "runtime_dir": "experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax",
+  "runtime_k_candidates": [
+    0,
+    2,
+    4,
+    8,
+    16,
+    32,
+    48,
+    64,
+    80,
+    96,
+    128
+  ],
+  "timestamp": "2026-08-03T03:48:26.399223+00:00",
+  "trace_sha256": null
+}
