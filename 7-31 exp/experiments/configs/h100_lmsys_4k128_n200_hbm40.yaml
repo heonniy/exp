@@ -1,0 +1,44 @@
+experiment:
+  name: h100_lmsys_4k128_n200_hbm40gib
+  seed: 731
+  gpu_physical_index: 0
+
+model:
+  path: /home/hwlee/model/Qwen3-30B-A3B
+  dtype: bfloat16
+  num_moe_layers: 48
+  num_experts_per_layer: 128
+  router_top_k: 8
+
+dataset:
+  parquet_glob: /home/hwlee/dataset/*.parquet
+  language: English
+  calibration_requests: 256
+  evaluation_requests: 200
+  input_tokens: 4096
+  output_tokens: 128
+  output_dir: artifacts/data/4k128_n200
+
+runtime:
+  prefetch_mode: current_layer_one_ahead
+  prefetch_depth: 1
+  expert_execution: serial_per_expert
+  expert_execution_order: ascending_expert_id
+  compute_streams: 1
+  copy_streams: 1
+  grouped_gemm: false
+  batched_gemm: false
+  fused_moe: false
+  global_lru: false
+  transient_expert_slots: 2
+  hbm_safety_margin_gib: 2
+  effective_hbm_gib: 40
+  prefix_sharing: false
+  continuous_batching: false
+
+sweep:
+  # 96 and 128 are deliberate infeasible sentinels. The Bmax sweep records
+  # and excludes candidates whose 40 GiB theoretical Bmax is zero.
+  trace_k: [0, 2, 4, 8, 16, 32, 48, 64, 80]
+  runtime_k: [0, 2, 4, 8, 16, 32, 48, 64, 80, 96, 128]
+  policies: [stream2, permanent_k]

@@ -18,7 +18,7 @@ from experiments.benchmark.memory_accounting import GIB, account_memory
 from experiments.benchmark.run_offloaded_decode import _read_examples
 from experiments.benchmark.run_runtime_sweep import configurations
 from experiments.common.config import load_config
-from experiments.common.gpu import require_gpu0
+from experiments.common.gpu import apply_effective_hbm_limit, require_gpu0
 from experiments.common.io import atomic_write_json, git_sha
 from experiments.runtime.host_expert_store import PinnedExpertStore
 from experiments.runtime.offloaded_model import OffloadedExpertEngine, load_offloaded_qwen
@@ -86,6 +86,9 @@ def main() -> None:
         raise RuntimeError("use ./scripts/gpu0.sh for the shared Bmax sweep")
     config = load_config(args.config)
     gpu = require_gpu0(torch)
+    effective_hbm = apply_effective_hbm_limit(
+        torch, gpu, config.runtime.effective_hbm_gib
+    )
     if args.output_dir is None:
         args.output_dir = (
             Path("experiments/results/by_commit")
@@ -93,17 +96,13 @@ def main() -> None:
             / "bmax_one_step_provisional"
         )
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    runs = list(
-        configurations(config.runtime_k, config.model.num_experts_per_layer)
+    candidates = list(
+        configurations(
+            config.runtime_k,
+            config.model.num_experts_per_layer,
+            config.policies,
+        )
     )
-    outputs = {
-        (policy, k): args.output_dir / f"{policy}_k{k}.json"
-        for policy, k in runs
-    }
-    pending = [pair for pair in runs if not outputs[pair].exists()]
-    if not pending:
-        print(json.dumps({"runs": len(runs), "completed": len(runs)}, indent=2))
-        return
 
     model_config = AutoConfig.from_pretrained(
         config.model.path, local_files_only=True
@@ -115,9 +114,9 @@ def main() -> None:
         torch.bfloat16,
     )
     accounting = {}
-    for policy, k in pending:
+    for policy, k in candidates:
         value = account_memory(
-            total_hbm_bytes=gpu.total_memory,
+            total_hbm_bytes=effective_hbm,
             dense_resident_bytes=args.dense_bytes,
             fixed_workspace_bytes=args.fixed_workspace_bytes,
             safety_margin_bytes=int(config.runtime.hbm_safety_margin_gib * GIB),
@@ -129,6 +128,32 @@ def main() -> None:
             peak_sequence_length=config.peak_sequence_length,
         )
         accounting[(policy, k)] = value
+    runs = [pair for pair in candidates if accounting[pair].theoretical_bmax > 0]
+    skipped = [
+        {
+            "policy": policy,
+            "k": k,
+            "reason": "theoretical_bmax_zero_under_effective_hbm_cap",
+            **accounting[(policy, k)].as_dict(),
+        }
+        for policy, k in candidates
+        if accounting[(policy, k)].theoretical_bmax <= 0
+    ]
+    if not runs:
+        raise ValueError("no runtime configuration is feasible under the HBM cap")
+    outputs = {
+        (policy, k): args.output_dir / f"{policy}_k{k}.json"
+        for policy, k in runs
+    }
+    pending = [pair for pair in runs if not outputs[pair].exists()]
+    if not pending:
+        print(
+            json.dumps(
+                {"runs": len(runs), "completed": len(runs), "skipped": skipped},
+                indent=2,
+            )
+        )
+        return
     search_upper = {
         pair: min(
             accounting[pair].theoretical_bmax,
@@ -138,9 +163,6 @@ def main() -> None:
         )
         for pair in pending
     }
-    if any(value <= 0 for value in search_upper.values()):
-        raise ValueError("theoretical Bmax is zero")
-
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
     trace.require_serial_reference()
@@ -181,10 +203,15 @@ def main() -> None:
         {
             "config": config.name,
             "gpu_physical_index": 0,
+            "physical_hbm_bytes": gpu.total_memory,
+            "effective_hbm_cap_bytes": effective_hbm,
+            "effective_hbm_cap_gib": effective_hbm / GIB,
+            "allocator_hbm_cap_enforced": effective_hbm < gpu.total_memory,
             "probe_mode": "real_runtime_static_peak_kv_one_decode_step",
             "shared_host_store_and_model": True,
             "cublas_workspaces_cleared_between_probes": True,
             "permanent_method": args.permanent_method,
+            "skipped_infeasible_candidates": skipped,
             "runs": manifest_runs,
         },
     )
@@ -229,6 +256,10 @@ def main() -> None:
             "config": config.name,
             "policy": policy,
             "k": k,
+            "physical_hbm_bytes": gpu.total_memory,
+            "effective_hbm_cap_bytes": effective_hbm,
+            "effective_hbm_cap_gib": effective_hbm / GIB,
+            "allocator_hbm_cap_enforced": effective_hbm < gpu.total_memory,
             "permanent_method": (
                 args.permanent_method if policy == "permanent_k" else None
             ),
@@ -258,10 +289,15 @@ def main() -> None:
             {
                 "config": config.name,
                 "gpu_physical_index": 0,
+                "physical_hbm_bytes": gpu.total_memory,
+                "effective_hbm_cap_bytes": effective_hbm,
+                "effective_hbm_cap_gib": effective_hbm / GIB,
+                "allocator_hbm_cap_enforced": effective_hbm < gpu.total_memory,
                 "probe_mode": "real_runtime_static_peak_kv_one_decode_step",
                 "shared_host_store_and_model": True,
                 "cublas_workspaces_cleared_between_probes": True,
                 "permanent_method": args.permanent_method,
+                "skipped_infeasible_candidates": skipped,
                 "runs": manifest_runs,
             },
         )

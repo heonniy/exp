@@ -31,6 +31,7 @@ class DatasetConfig:
 class RuntimeConfig:
     transient_expert_slots: int
     hbm_safety_margin_gib: float
+    effective_hbm_gib: float | None
     expert_execution_order: str
     global_lru: bool
 
@@ -101,6 +102,11 @@ def load_config(path: str | Path) -> ExperimentConfig:
         runtime=RuntimeConfig(
             transient_expert_slots=int(_required(runtime, "transient_expert_slots")),
             hbm_safety_margin_gib=float(_required(runtime, "hbm_safety_margin_gib")),
+            effective_hbm_gib=(
+                float(runtime["effective_hbm_gib"])
+                if runtime.get("effective_hbm_gib") is not None
+                else None
+            ),
             expert_execution_order=str(_required(runtime, "expert_execution_order")),
             global_lru=bool(_required(runtime, "global_lru")),
         ),
@@ -124,4 +130,12 @@ def validate_config(config: ExperimentConfig) -> None:
             raise ValueError(f"invalid resident Expert count: {value}")
     if config.dataset.input_tokens <= 0 or config.dataset.output_tokens <= 0:
         raise ValueError("fixed input/output lengths must be positive")
-
+    if (
+        config.runtime.effective_hbm_gib is not None
+        and config.runtime.effective_hbm_gib <= 0
+    ):
+        raise ValueError("effective_hbm_gib must be positive when configured")
+    valid_policies = {"stream2", "permanent_k", "quota_lru_k", "full_resident"}
+    invalid_policies = sorted(set(config.policies) - valid_policies)
+    if invalid_policies:
+        raise ValueError(f"invalid runtime policies: {invalid_policies}")

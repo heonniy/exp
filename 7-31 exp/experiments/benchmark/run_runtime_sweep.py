@@ -11,14 +11,34 @@ from experiments.common.config import load_config
 from experiments.common.io import atomic_write_json
 
 
-def configurations(k_values: tuple[int, ...], num_experts: int):
+def configurations(
+    k_values: tuple[int, ...],
+    num_experts: int,
+    policies: tuple[str, ...] | None = None,
+):
+    """Yield unique runtime configurations in configured order.
+
+    ``policies=None`` preserves the historical sweep layout. Explicit policy
+    lists let reduced experiments omit Quota-LRU without special-case scripts.
+    The k=0 streaming endpoint remains unique in either mode.
+    """
+
+    selected = (
+        ("permanent_k", "quota_lru_k", "full_resident")
+        if policies is None
+        else policies
+    )
     for k in k_values:
         if k == 0:
-            yield "stream2", k
-        elif k == num_experts:
+            if policies is None or "stream2" in selected:
+                yield "stream2", k
+            continue
+        if k == num_experts and "full_resident" in selected:
             yield "full_resident", k
-        else:
+            continue
+        if "permanent_k" in selected:
             yield "permanent_k", k
+        if "quota_lru_k" in selected and k < num_experts:
             yield "quota_lru_k", k
 
 
@@ -92,7 +112,7 @@ def main() -> None:
     commands = []
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for policy, k in configurations(
-        config.runtime_k, config.model.num_experts_per_layer
+        config.runtime_k, config.model.num_experts_per_layer, config.policies
     ):
         batch_size = resolve_batch_size(
             args.batch_size, args.bmax_dir, policy, k

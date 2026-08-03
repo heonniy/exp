@@ -14,7 +14,7 @@ from experiments.benchmark.memory_accounting import GIB, account_memory
 from experiments.benchmark.measure_kv_bytes import logical_kv_bytes_per_token
 from experiments.benchmark.run_offloaded_decode import _manager, _read_examples
 from experiments.common.config import load_config
-from experiments.common.gpu import require_gpu0
+from experiments.common.gpu import apply_effective_hbm_limit, require_gpu0
 from experiments.common.io import atomic_write_json
 from experiments.runtime.host_expert_store import PinnedExpertStore
 from experiments.runtime.kv_cache import make_static_kv_cache
@@ -195,6 +195,9 @@ def main() -> None:
 
     config = load_config(args.config)
     gpu = require_gpu0(torch)
+    effective_hbm = apply_effective_hbm_limit(
+        torch, gpu, config.runtime.effective_hbm_gib
+    )
     if args.policy == "stream2" and args.k != 0:
         raise ValueError("stream2 requires k=0")
     if args.policy == "full_resident" and (
@@ -212,7 +215,7 @@ def main() -> None:
         torch.bfloat16,
     )
     accounting = account_memory(
-        total_hbm_bytes=gpu.total_memory,
+        total_hbm_bytes=effective_hbm,
         dense_resident_bytes=args.dense_bytes,
         fixed_workspace_bytes=args.fixed_workspace_bytes,
         safety_margin_bytes=int(config.runtime.hbm_safety_margin_gib * GIB),
@@ -310,6 +313,10 @@ def main() -> None:
         "config": config.name,
         "policy": args.policy,
         "k": args.k,
+        "physical_hbm_bytes": gpu.total_memory,
+        "effective_hbm_cap_bytes": effective_hbm,
+        "effective_hbm_cap_gib": effective_hbm / GIB,
+        "allocator_hbm_cap_enforced": effective_hbm < gpu.total_memory,
         "permanent_method": (
             args.permanent_method if args.policy == "permanent_k" else None
         ),

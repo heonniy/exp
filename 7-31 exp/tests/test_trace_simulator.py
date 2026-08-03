@@ -55,6 +55,16 @@ def test_trace_request_prefix_has_derived_identity() -> None:
     assert prefix.digest() != trace.digest()
 
 
+def test_trace_request_and_token_prefix_has_derived_identity() -> None:
+    trace = synthetic_trace()
+    prefix = trace.prefix(1, 1)
+    assert prefix.routing_expert_ids.shape[:2] == (1, 1)
+    assert prefix.forced_output_ids.shape == (1, 1)
+    assert prefix.metadata["source_trace_sha256"] == trace.digest()
+    assert prefix.metadata["request_prefix_count"] == 1
+    assert prefix.metadata["output_token_prefix_count"] == 1
+
+
 def test_stream2_refetch_accounting() -> None:
     trace = synthetic_trace()
     result = simulate(trace, Stream2Policy(1, 4), 100, batch_size=2)

@@ -15,7 +15,7 @@ from experiments.benchmark.find_runtime_max_batch import (
 from experiments.benchmark.run_offloaded_decode import _manager, _read_examples
 from experiments.benchmark.run_runtime_sweep import configurations
 from experiments.common.config import load_config
-from experiments.common.gpu import require_gpu0
+from experiments.common.gpu import apply_effective_hbm_limit, require_gpu0
 from experiments.common.io import atomic_write_json
 from experiments.runtime.host_expert_store import PinnedExpertStore
 from experiments.runtime.kv_cache import make_static_kv_cache
@@ -52,12 +52,13 @@ def assert_closed_monotonic_boundary(
             )
 
 
-def _probe_256(
+def _probe_full_decode(
     *,
     model,
     host_store: PinnedExpertStore,
     calibration: RoutingTrace,
     trace: RoutingTrace,
+    input_ids: np.ndarray,
     forced_tokens: np.ndarray,
     policy: str,
     k: int,
@@ -69,8 +70,9 @@ def _probe_256(
     num_layers: int,
     num_experts: int,
     permanent_method: str,
+    include_prefill: bool,
 ) -> dict:
-    manager = engine = cache = reserve = output = None
+    manager = engine = cache = reserve = output = prefill_input = None
     _detach_engine(model)
     _clear_cuda_probe_state()
     torch.cuda.reset_peak_memory_stats()
@@ -96,18 +98,39 @@ def _probe_256(
         attach_engine(model, engine)
         reserve = torch.empty(safety_margin_bytes, dtype=torch.uint8, device="cuda:0")
         reserve.zero_()
-        cache = make_static_kv_cache(
-            model,
-            batch_size=batch_size,
-            max_cache_length=peak_sequence_length,
-            initial_sequence_length=input_tokens,
-            dtype=torch.bfloat16,
-            device="cuda:0",
-        )
+        prefill_seconds = 0.0
+        if include_prefill:
+            prefill_input = torch.as_tensor(
+                input_ids[:batch_size], dtype=torch.long, device="cuda:0"
+            )
+            prefill_started = time.perf_counter()
+            with torch.inference_mode():
+                output = model(
+                    input_ids=prefill_input,
+                    use_cache=True,
+                    logits_to_keep=1,
+                    output_router_logits=False,
+                    return_dict=True,
+                )
+            torch.cuda.synchronize()
+            prefill_seconds = time.perf_counter() - prefill_started
+            cache = output.past_key_values
+            del output, prefill_input
+            output = prefill_input = None
+        else:
+            cache = make_static_kv_cache(
+                model,
+                batch_size=batch_size,
+                max_cache_length=peak_sequence_length,
+                initial_sequence_length=input_tokens,
+                dtype=torch.bfloat16,
+                device="cuda:0",
+            )
         engine.set_forced_routing(
             trace.routing_expert_ids[:batch_size, :decode_steps],
             trace.require_routing_weights()[:batch_size, :decode_steps],
         )
+        decode_started = time.perf_counter()
         with torch.inference_mode():
             for step in range(decode_steps):
                 engine.decode_step = step
@@ -132,6 +155,7 @@ def _probe_256(
                         flush=True,
                     )
         torch.cuda.synchronize()
+        decode_seconds = time.perf_counter() - decode_started
         metrics = engine.metrics()
         if metrics["h2d_copy_operations_per_fetch"] != 1.0:
             raise AssertionError("packed runtime did not issue one H2D copy per fetch")
@@ -140,6 +164,8 @@ def _probe_256(
             "feasible": True,
             "decode_steps_completed": decode_steps,
             "elapsed_seconds": time.perf_counter() - started,
+            "prefill_seconds": prefill_seconds,
+            "decode_seconds": decode_seconds,
             "policy_initialization_seconds": policy_initialization_seconds,
             "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
             "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
@@ -163,7 +189,7 @@ def _probe_256(
         }
     finally:
         _detach_engine(model)
-        del output, cache, reserve, engine, manager
+        del output, prefill_input, cache, reserve, engine, manager
         _clear_cuda_probe_state()
 
 
@@ -171,7 +197,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Turn provisional one-step Bmax values into physical Bmax values by "
-            "validating the B-1/B/B+1 boundary for all 256 decode steps."
+            "validating the B-1/B/B+1 boundary for every configured decode step."
         )
     )
     parser.add_argument("--config", type=Path, required=True)
@@ -182,6 +208,11 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--decode-steps", type=int, default=256)
     parser.add_argument(
+        "--include-prefill",
+        action="store_true",
+        help="Validate a real fixed-length prefill before the full decode.",
+    )
+    parser.add_argument(
         "--permanent-method",
         choices=["batch_step_union_presence", "token_frequency"],
         default="batch_step_union_presence",
@@ -189,14 +220,35 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
-    require_gpu0(torch)
+    gpu = require_gpu0(torch)
+    effective_hbm = apply_effective_hbm_limit(
+        torch, gpu, config.runtime.effective_hbm_gib
+    )
     if args.decode_steps != config.dataset.output_tokens:
         raise ValueError("physical Bmax validation must run all configured tokens")
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
     trace.require_serial_reference()
     calibration = RoutingTrace.load(args.calibration_trace)
-    runs = list(configurations(config.runtime_k, config.model.num_experts_per_layer))
+    configured_runs = list(
+        configurations(
+            config.runtime_k,
+            config.model.num_experts_per_layer,
+            config.policies,
+        )
+    )
+    runs = [
+        (policy, k)
+        for policy, k in configured_runs
+        if (args.provisional_dir / f"{policy}_k{k}.json").exists()
+    ]
+    skipped_runs = [
+        {"policy": policy, "k": k, "reason": "no_feasible_provisional_result"}
+        for policy, k in configured_runs
+        if not (args.provisional_dir / f"{policy}_k{k}.json").exists()
+    ]
+    if not runs:
+        raise ValueError("provisional directory has no feasible configured runs")
     provisional = {}
     maximum_candidate = 0
     for policy, k in runs:
@@ -215,6 +267,9 @@ def main() -> None:
         [row["forced_output_ids"][: args.decode_steps] for row in examples],
         dtype=np.int64,
     )
+    input_ids = np.asarray([row["input_ids"] for row in examples], dtype=np.int64)
+    if input_ids.shape != (maximum_candidate, config.dataset.input_tokens):
+        raise ValueError("workload input IDs do not match configured prefill length")
     if not np.array_equal(
         forced_tokens.astype(np.int32),
         trace.forced_output_ids[:maximum_candidate, : args.decode_steps],
@@ -254,11 +309,12 @@ def main() -> None:
             if batch_size not in probes:
                 attempts = []
                 for _ in range(2):
-                    value = _probe_256(
+                    value = _probe_full_decode(
                         model=model,
                         host_store=host_store,
                         calibration=calibration,
                         trace=trace,
+                        input_ids=input_ids,
                         forced_tokens=forced_tokens,
                         policy=policy,
                         k=k,
@@ -270,6 +326,7 @@ def main() -> None:
                         num_layers=config.model.num_moe_layers,
                         num_experts=config.model.num_experts_per_layer,
                         permanent_method=args.permanent_method,
+                        include_prefill=args.include_prefill,
                     )
                     attempts.append(value)
                     if value["feasible"]:
@@ -283,16 +340,17 @@ def main() -> None:
                 probes[batch_size] = selected
             return probes[batch_size]
 
-        for batch_size in sorted({max(1, candidate - 1), candidate, candidate + 1}):
-            probe(batch_size)
         if probe(candidate)["feasible"]:
             validated = candidate
-            while probe(validated + 1)["feasible"]:
-                validated += 1
         else:
-            validated = candidate - 1
-            while validated > 0 and not probe(validated)["feasible"]:
-                validated -= 1
+            low, high = 0, candidate - 1
+            while low < high:
+                middle = (low + high + 1) // 2
+                if probe(middle)["feasible"]:
+                    low = middle
+                else:
+                    high = middle - 1
+            validated = low
         if validated <= 0:
             raise RuntimeError(f"no feasible batch found for {policy} k={k}")
         probe(max(1, validated - 1))
@@ -306,10 +364,20 @@ def main() -> None:
                 for key, value in source.items()
                 if key not in {"probes", "measured_bmax", "probe_mode"}
             },
-            "probe_mode": "real_runtime_static_peak_kv_full_256_step_boundary",
+            "probe_mode": (
+                "real_runtime_prefill_and_full_decode_boundary"
+                if args.include_prefill
+                else "real_runtime_static_peak_kv_full_decode_boundary"
+            ),
             "provisional_one_step_bmax": candidate,
             "measured_bmax": validated,
             "decode_steps": args.decode_steps,
+            "prefill_tokens": config.dataset.input_tokens if args.include_prefill else 0,
+            "includes_real_prefill": args.include_prefill,
+            "physical_hbm_bytes": gpu.total_memory,
+            "effective_hbm_cap_bytes": effective_hbm,
+            "effective_hbm_cap_gib": effective_hbm / (1024**3),
+            "allocator_hbm_cap_enforced": effective_hbm < gpu.total_memory,
             "boundary_batches_required": [
                 max(1, validated - 1),
                 validated,
@@ -327,8 +395,15 @@ def main() -> None:
             args.output_dir / "manifest.json",
             {
                 "config": config.name,
-                "probe_mode": "real_runtime_static_peak_kv_full_256_step_boundary",
+                "probe_mode": (
+                    "real_runtime_prefill_and_full_decode_boundary"
+                    if args.include_prefill
+                    else "real_runtime_static_peak_kv_full_decode_boundary"
+                ),
                 "decode_steps": args.decode_steps,
+                "includes_real_prefill": args.include_prefill,
+                "effective_hbm_cap_bytes": effective_hbm,
+                "skipped_infeasible_candidates": skipped_runs,
                 "forced_routing_trace_sha256": trace.digest(),
                 "runs": manifest_runs,
             },
@@ -338,8 +413,15 @@ def main() -> None:
         args.output_dir / "manifest.json",
         {
             "config": config.name,
-            "probe_mode": "real_runtime_static_peak_kv_full_256_step_boundary",
+            "probe_mode": (
+                "real_runtime_prefill_and_full_decode_boundary"
+                if args.include_prefill
+                else "real_runtime_static_peak_kv_full_decode_boundary"
+            ),
             "decode_steps": args.decode_steps,
+            "includes_real_prefill": args.include_prefill,
+            "effective_hbm_cap_bytes": effective_hbm,
+            "skipped_infeasible_candidates": skipped_runs,
             "forced_routing_trace_sha256": trace.digest(),
             "runs": manifest_runs,
         },

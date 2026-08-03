@@ -17,7 +17,7 @@ from experiments.benchmark.run_offloaded_decode import (
     _read_examples,
 )
 from experiments.common.config import load_config
-from experiments.common.gpu import require_gpu0
+from experiments.common.gpu import apply_effective_hbm_limit, require_gpu0
 from experiments.common.io import atomic_write_json
 from experiments.runtime.host_expert_store import PinnedExpertStore
 from experiments.runtime.kv_cache import make_static_kv_cache
@@ -107,6 +107,17 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--decode-steps", type=int)
     parser.add_argument("--requests", type=int)
+    parser.add_argument(
+        "--kv-setup",
+        choices=["real_prefill", "static_zero"],
+        default="static_zero",
+    )
+    parser.add_argument(
+        "--minimum-steady-full-waves",
+        type=int,
+        default=5,
+        help="Set to zero for a reduced fixed-workload run without repeat claims.",
+    )
     parser.add_argument("--cold-each-wave", action="store_true")
     parser.add_argument("--prefetch-depth", choices=[0, 1], type=int, default=1)
     parser.add_argument(
@@ -120,7 +131,12 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
-    require_gpu0(torch)
+    gpu = require_gpu0(torch)
+    effective_hbm = apply_effective_hbm_limit(
+        torch, gpu, config.runtime.effective_hbm_gib
+    )
+    if args.minimum_steady_full_waves < 0:
+        raise ValueError("minimum steady full waves cannot be negative")
     trace = RoutingTrace.load(args.forced_routing_trace)
     trace.validate(config.model.num_experts_per_layer, require_weights=True)
     trace.require_serial_reference()
@@ -199,29 +215,107 @@ def main() -> None:
     initialize_policy()
     totals = {name: 0 for name in SUM_METRICS}
     timing_totals = {name: 0.0 for name in TIMING_METRICS}
+    prefill_totals = {name: 0 for name in SUM_METRICS}
+    prefill_timing_totals = {name: 0.0 for name in TIMING_METRICS}
     routing_mismatch_totals: dict[tuple[int, int], dict[str, int]] = {}
     attention_total_ms = 0.0
     router_total_ms = 0.0
     other_dense_host_idle_total_ms = 0.0
+    prefill_attention_total_ms = 0.0
+    prefill_router_total_ms = 0.0
+    prefill_other_dense_host_idle_total_ms = 0.0
     waves = []
     kv_setup_seconds = 0.0
     full_wave_seconds = []
     logits_digests = []
+    torch.cuda.reset_peak_memory_stats()
     for wave_index, start in enumerate(range(0, requests, args.batch_size)):
         if wave_index and args.cold_each_wave and args.policy == "quota_lru_k":
             initialize_policy()
         stop = min(start + args.batch_size, requests)
         wave_batch = stop - start
+        engine.set_forced_routing(None)
+        prefill_before = engine.metrics()
+        prefill_attention_timer = prefill_router_timer = None
+        if args.timeline_events and args.kv_setup == "real_prefill":
+            prefill_attention_timer = CudaModuleTimer(
+                [layer.self_attn for layer in model.model.layers]
+            )
+            prefill_router_timer = CudaModuleTimer(
+                [layer.mlp.gate for layer in model.model.layers]
+            )
         kv_started = time.perf_counter()
-        past = make_static_kv_cache(
-            model,
-            batch_size=wave_batch,
-            max_cache_length=config.peak_sequence_length,
-            initial_sequence_length=config.dataset.input_tokens,
-        )
+        if args.kv_setup == "real_prefill":
+            prompt = torch.as_tensor(
+                [row["input_ids"] for row in examples[start:stop]],
+                dtype=torch.long,
+                device="cuda:0",
+            )
+            with torch.inference_mode():
+                output = model(
+                    input_ids=prompt,
+                    use_cache=True,
+                    logits_to_keep=1,
+                    output_router_logits=False,
+                    return_dict=True,
+                )
+            past = output.past_key_values
+            del prompt
+        else:
+            past = make_static_kv_cache(
+                model,
+                batch_size=wave_batch,
+                max_cache_length=config.peak_sequence_length,
+                initial_sequence_length=config.dataset.input_tokens,
+            )
         torch.cuda.synchronize()
         wave_kv_setup = time.perf_counter() - kv_started
         kv_setup_seconds += wave_kv_setup
+        prefill_after = engine.metrics()
+        prefill_attention_ms = (
+            prefill_attention_timer.elapsed_ms()
+            if prefill_attention_timer is not None
+            else None
+        )
+        prefill_router_ms = (
+            prefill_router_timer.elapsed_ms()
+            if prefill_router_timer is not None
+            else None
+        )
+        if prefill_attention_timer:
+            prefill_attention_timer.remove()
+        if prefill_router_timer:
+            prefill_router_timer.remove()
+        wave_prefill_timings = {
+            name: _timing_delta(prefill_before, prefill_after, name)
+            for name in TIMING_METRICS
+        }
+        if args.kv_setup == "real_prefill":
+            for name in SUM_METRICS:
+                prefill_totals[name] += _metric_delta(
+                    prefill_before, prefill_after, name
+                )
+            for name, value in wave_prefill_timings.items():
+                if value is not None:
+                    prefill_timing_totals[name] += value
+            if prefill_attention_ms is not None:
+                prefill_attention_total_ms += prefill_attention_ms
+            if prefill_router_ms is not None:
+                prefill_router_total_ms += prefill_router_ms
+        prefill_other_dense_host_idle_ms = (
+            max(
+                0.0,
+                wave_kv_setup * 1000
+                - float(prefill_attention_ms)
+                - float(prefill_router_ms)
+                - float(wave_prefill_timings["expert_compute_ms"])
+                - float(wave_prefill_timings["exposed_h2d_stall_ms"]),
+            )
+            if args.timeline_events and args.kv_setup == "real_prefill"
+            else None
+        )
+        if prefill_other_dense_host_idle_ms is not None:
+            prefill_other_dense_host_idle_total_ms += prefill_other_dense_host_idle_ms
         forced_tokens = np.asarray(
             [row["forced_output_ids"][:steps] for row in examples[start:stop]],
             dtype=np.int64,
@@ -339,10 +433,46 @@ def main() -> None:
                 "start": start,
                 "stop": stop,
                 "batch_size": wave_batch,
+                "prompt_tokens": wave_batch * config.dataset.input_tokens,
                 "generated_tokens": wave_batch * steps,
                 "kv_setup_seconds": wave_kv_setup,
+                "prefill_wall_seconds": (
+                    wave_kv_setup if args.kv_setup == "real_prefill" else 0.0
+                ),
+                "prefill_prompt_tokens_per_second": (
+                    wave_batch * config.dataset.input_tokens / wave_kv_setup
+                    if args.kv_setup == "real_prefill"
+                    else None
+                ),
                 "decode_wall_seconds": elapsed,
                 "decode_tokens_per_second": wave_batch * steps / elapsed,
+                "e2e_wall_seconds": (
+                    wave_kv_setup + elapsed
+                    if args.kv_setup == "real_prefill"
+                    else elapsed
+                ),
+                "e2e_total_tokens_per_second": (
+                    wave_batch * (config.dataset.input_tokens + steps)
+                    / (wave_kv_setup + elapsed)
+                    if args.kv_setup == "real_prefill"
+                    else wave_batch * steps / elapsed
+                ),
+                "prefill_expert_h2d_fetches": (
+                    _metric_delta(
+                        prefill_before, prefill_after, "expert_h2d_fetches"
+                    )
+                    if args.kv_setup == "real_prefill"
+                    else 0
+                ),
+                **{
+                    f"prefill_{name}": value
+                    for name, value in wave_prefill_timings.items()
+                },
+                "prefill_attention_ms": prefill_attention_ms,
+                "prefill_router_ms": prefill_router_ms,
+                "prefill_other_dense_host_idle_ms": (
+                    prefill_other_dense_host_idle_ms
+                ),
                 "expert_h2d_fetches": _metric_delta(
                     before, after, "expert_h2d_fetches"
                 ),
@@ -379,17 +509,30 @@ def main() -> None:
         )
 
     decode_makespan = sum(wave["decode_wall_seconds"] for wave in waves)
+    prefill_makespan = sum(wave["prefill_wall_seconds"] for wave in waves)
+    e2e_makespan = sum(wave["e2e_wall_seconds"] for wave in waves)
+    prompt_tokens = requests * config.dataset.input_tokens
     generated = requests * steps
     natural_assignments = totals["natural_route_assignments"]
     warmup_full_wave_count = 1 if full_wave_seconds else 0
     steady_full_wave_seconds = full_wave_seconds[warmup_full_wave_count:]
-    if not args.timeline_events and len(steady_full_wave_seconds) < 5:
+    if (
+        not args.timeline_events
+        and len(steady_full_wave_seconds) < args.minimum_steady_full_waves
+    ):
         raise RuntimeError(
-            "performance protocol requires at least five full steady-state waves"
+            "performance protocol requires at least "
+            f"{args.minimum_steady_full_waves} full steady-state waves"
         )
     result = {
         "config": config.name,
         "gpu_physical_index": 0,
+        "physical_hbm_bytes": gpu.total_memory,
+        "effective_hbm_cap_bytes": effective_hbm,
+        "effective_hbm_cap_gib": effective_hbm / (1024**3),
+        "allocator_hbm_cap_enforced": effective_hbm < gpu.total_memory,
+        "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+        "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
         "policy": args.policy,
         "k": args.k,
         "permanent_method": (
@@ -404,10 +547,22 @@ def main() -> None:
         "prefetch_submit_order": (
             args.prefetch_submit_order if args.prefetch_depth == 1 else None
         ),
-        "kv_setup": "static_zero",
+        "kv_setup": args.kv_setup,
+        "prompt_tokens": prompt_tokens,
         "generated_tokens": generated,
+        "fixed_workload_prefill_makespan_seconds": prefill_makespan,
         "fixed_workload_decode_makespan_seconds": decode_makespan,
+        "fixed_workload_e2e_makespan_seconds": e2e_makespan,
+        "prefill_prompt_tokens_per_second": (
+            prompt_tokens / prefill_makespan
+            if args.kv_setup == "real_prefill"
+            else None
+        ),
         "fixed_workload_tokens_per_second": generated / decode_makespan,
+        "e2e_total_tokens_per_second": (
+            (prompt_tokens + generated) / e2e_makespan
+        ),
+        "e2e_requests_per_second": requests / e2e_makespan,
         "steady_full_batch_tokens_per_second": (
             len(steady_full_wave_seconds) * args.batch_size * steps
             / sum(steady_full_wave_seconds)
@@ -439,8 +594,14 @@ def main() -> None:
             if len(steady_full_wave_seconds) > 1
             else 0.0 if steady_full_wave_seconds else None
         ),
+        "minimum_steady_full_waves_required": args.minimum_steady_full_waves,
+        "reduced_workload_repeat_requirement_waived": (
+            args.minimum_steady_full_waves == 0
+        ),
         "performance_warmup_and_repeat_protocol_valid": (
-            len(steady_full_wave_seconds) >= 5 if not args.timeline_events else None
+            len(steady_full_wave_seconds) >= args.minimum_steady_full_waves
+            if not args.timeline_events
+            else None
         ),
         "cold_start_seconds": (
             host_preload_seconds + model_load_seconds + policy_initialization_seconds
@@ -457,9 +618,11 @@ def main() -> None:
         "model_load_seconds": model_load_seconds,
         "policy_initialization_seconds": policy_initialization_seconds,
         "forced_routing_trace_sha256": trace.digest(),
-        "natural_routing_reference_comparable": False,
+        "natural_routing_reference_comparable": args.kv_setup == "real_prefill",
         "natural_routing_mismatch_interpretation": (
-            "invalid_reference_context_static_zero_kv"
+            "same_prompt_prefill_numerical_drift"
+            if args.kv_setup == "real_prefill"
+            else "invalid_reference_context_static_zero_kv"
         ),
         "forced_output_ids_sha256": hashlib.sha256(
             workload_forced.tobytes()
@@ -504,11 +667,27 @@ def main() -> None:
             name: value if args.timeline_events else None
             for name, value in timing_totals.items()
         },
+        **{
+            f"prefill_{name}": value if args.timeline_events else None
+            for name, value in prefill_timing_totals.items()
+        },
         "attention_ms": attention_total_ms if args.timeline_events else None,
         "router_ms": router_total_ms if args.timeline_events else None,
+        "prefill_attention_ms": (
+            prefill_attention_total_ms if args.timeline_events else None
+        ),
+        "prefill_router_ms": (
+            prefill_router_total_ms if args.timeline_events else None
+        ),
         "other_dense_host_idle_ms": (
             other_dense_host_idle_total_ms if args.timeline_events else None
         ),
+        "prefill_other_dense_host_idle_ms": (
+            prefill_other_dense_host_idle_total_ms
+            if args.timeline_events
+            else None
+        ),
+        **{f"prefill_{name}": value for name, value in prefill_totals.items()},
         **totals,
         "wave_results": waves,
     }
@@ -522,8 +701,18 @@ def main() -> None:
                 "batch_size": args.batch_size,
                 "requests": requests,
                 "decode_steps": steps,
+                "fixed_workload_prefill_makespan_seconds": prefill_makespan,
                 "fixed_workload_decode_makespan_seconds": decode_makespan,
+                "fixed_workload_e2e_makespan_seconds": e2e_makespan,
+                "prefill_prompt_tokens_per_second": (
+                    prompt_tokens / prefill_makespan
+                    if args.kv_setup == "real_prefill"
+                    else None
+                ),
                 "fixed_workload_tokens_per_second": generated / decode_makespan,
+                "e2e_total_tokens_per_second": (
+                    (prompt_tokens + generated) / e2e_makespan
+                ),
                 "expert_h2d_fetches": totals["expert_h2d_fetches"],
                 "timeline_events_enabled": args.timeline_events,
             },

@@ -132,6 +132,34 @@ class RoutingTrace:
             ),
         )
 
+    def prefix(self, request_count: int, output_tokens: int) -> "RoutingTrace":
+        if not 0 < request_count <= self.num_requests:
+            raise ValueError("requested trace prefix is outside available requests")
+        if not 0 < output_tokens <= self.output_tokens:
+            raise ValueError("requested token prefix is outside available output")
+        metadata = dict(self.metadata)
+        metadata["source_trace_sha256"] = self.digest()
+        metadata["request_prefix_count"] = request_count
+        metadata["output_token_prefix_count"] = output_tokens
+        metadata.pop("trace_sha256", None)
+        return RoutingTrace(
+            conversation_ids=self.conversation_ids[:request_count].copy(),
+            forced_output_ids=self.forced_output_ids[
+                :request_count, :output_tokens
+            ].copy(),
+            routing_expert_ids=self.routing_expert_ids[
+                :request_count, :output_tokens
+            ].copy(),
+            metadata=metadata,
+            routing_expert_weights=(
+                self.routing_expert_weights[
+                    :request_count, :output_tokens
+                ].copy()
+                if self.routing_expert_weights is not None
+                else None
+            ),
+        )
+
     def save(self, path: str | Path) -> None:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)

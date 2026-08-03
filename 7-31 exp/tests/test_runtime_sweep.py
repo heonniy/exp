@@ -25,6 +25,22 @@ def test_runtime_sweep_has_unique_extreme_endpoints() -> None:
     ]
 
 
+def test_runtime_sweep_honors_permanent_only_policy_list() -> None:
+    values = list(
+        configurations(
+            (0, 2, 8, 80),
+            128,
+            ("stream2", "permanent_k"),
+        )
+    )
+    assert values == [
+        ("stream2", 0),
+        ("permanent_k", 2),
+        ("permanent_k", 8),
+        ("permanent_k", 80),
+    ]
+
+
 def test_runtime_sweep_resolves_measured_bmax(tmp_path) -> None:
     path = tmp_path / "quota_lru_k_k8.json"
     path.write_text(
