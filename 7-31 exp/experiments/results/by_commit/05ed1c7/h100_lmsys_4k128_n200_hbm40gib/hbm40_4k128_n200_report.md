@@ -44,6 +44,10 @@ operating point, not a claim of a universal optimum.
 The validator output is `summary.json`; the complete one-row-per-k table is
 `summary.csv`; `operating_curve.png` is a visual summary.
 
+The deeper component and exact per-wave diagnosis is in
+`hbm40_4k128_n200_breakdown_study.md`, with machine-readable
+`breakdown_by_k.csv`, `breakdown_study.json`, and `wave_latency.csv`.
+
 ## Physical Bmax and phase-separated performance
 
 All times below are the uninstrumented makespan for the same 200 requests. E2E
