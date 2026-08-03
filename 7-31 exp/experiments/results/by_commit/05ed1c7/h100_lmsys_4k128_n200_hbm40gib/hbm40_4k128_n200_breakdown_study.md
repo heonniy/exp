@@ -21,6 +21,40 @@ H2D/token은 68.5%, copy event를 기다리는 compute-stream wait/token은 85.7
 
 ![Decode breakdown](decode_breakdown.png)
 
+## Miss rate는 K와 함께 감소하지만 전체 fetch 수는 k=8→16에서 잠깐 증가한다
+
+이 Permanent-only sweep에서 decode `fetch miss`는 active Expert가 Permanent
+buffer에 없어 transient packed H2D copy가 한 번 필요한 경우다. 따라서
+`Expert executions = fetch misses + Permanent hits`이며, fetch miss 하나는 정확히
+한 번의 contiguous Expert H2D copy와 대응한다.
+
+| k | Bmax | Waves | Active Expert executions | Fetch misses | Permanent hits | Miss rate | Fetches/generated token |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 60 | 4 | 2,488,403 | 2,488,403 | 0 | 100.000% | 97.203 |
+| 2 | 59 | 4 | 2,517,531 | 2,468,915 | 48,616 | 98.069% | 96.442 |
+| 4 | 57 | 4 | 2,545,429 | 2,447,788 | 97,641 | 96.164% | 95.617 |
+| 8 | 54 | 4 | 2,567,551 | 2,371,655 | 195,896 | 92.370% | 92.643 |
+| 16 | 48 | 5 | 2,843,568 | 2,386,555 | 457,013 | 83.928% | 93.225 |
+| 32 | 37 | 6 | 3,404,923 | 2,274,026 | 1,130,897 | 66.786% | 88.829 |
+| 48 | 25 | 8 | 4,205,153 | 2,049,264 | 2,155,889 | 48.732% | 80.049 |
+| 64 | 13 | 16 | 6,011,789 | 1,739,529 | 4,272,260 | 28.935% | 67.950 |
+| 80 | 2 | 100 | 9,282,451 | 1,227,420 | 8,055,031 | 13.223% | 47.946 |
+
+Miss rate는 100.0%에서 13.2%까지 strict monotonic하게 감소한다. 전체 decode
+fetch 수도 k=80에서 k=0 대비 50.7% 감소한다. 다만 k=16은 k=8보다 fetch가
+14,900회(0.63%) 많다. Bmax가 54→48, wave가 4→5로 바뀌면서 Expert를 batch
+안에서 합쳐 실행할 기회가 줄어 active Expert execution 자체가 늘기 때문이다.
+즉 Permanent의 hit 효율은 계속 좋아지지만, capacity loss가 일부 fetch 절감을
+상쇄한다.
+
+![Decode-only miss and timing breakdown](decode_only_breakdown.png)
+
+왼쪽은 실제 200-request decode의 fetch miss와 Permanent hit, 가운데는 one-wave
+profile의 raw/exposed/overlapped H2D, 오른쪽은 서로 중복 없이 profile wall로
+합산되는 decode-only partition이다. exposed H2D를 제외한 나머지 additive wall
+time은 k=0의 11.722 ms/token에서 k=80의 107.823 ms/token으로 9.20배 증가한다.
+정확한 값은 `decode_only_breakdown.csv`에 저장했다.
+
 ## Decode의 큰 비중은 exposed H2D에서 residual과 Expert 실행으로 이동한다
 
 아래 값은 각 K의 Bmax에서 수행한 별도 one-wave intrusive profile을 generated
@@ -139,7 +173,9 @@ copy-event H2D wait, 각 wave latency는 현재 데이터로 직접 답할 수 �
   --output-breakdown-csv experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/breakdown_by_k.csv \
   --output-wave-csv experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/wave_latency.csv \
   --output-breakdown-plot experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/decode_breakdown.png \
-  --output-wave-plot experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/wave_latency.png
+  --output-wave-plot experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/wave_latency.png \
+  --output-decode-csv experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/decode_only_breakdown.csv \
+  --output-decode-plot experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/decode_only_breakdown.png
 ```
 
 ## 한계와 강건성

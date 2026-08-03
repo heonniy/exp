@@ -18,16 +18,27 @@ Quota/LRU is excluded.
      timing, traffic, and instrumented component attribution.
 4. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/hbm40_4k128_n200_report.md`
    - Answer-first interpretation, caveats, and comparison tables.
-5. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/operating_curve.png`
+5. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/hbm40_4k128_n200_breakdown_study.md`
+   - Technical diagnosis of miss rate, raw/exposed H2D, non-H2D decode time,
+     and exact wave latency.
+6. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/decode_only_breakdown.csv`
+   and `decode_only_breakdown.png`
+   - Decode-only lookup and visual: exact 200-request fetch misses/Permanent
+     hits plus normalized one-wave timing components.
+7. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/breakdown_study.json`,
+   `breakdown_by_k.csv`, and `wave_latency.csv`
+   - Machine-readable component definitions, full K table, and all 151 exact
+     uninstrumented wave latencies.
+8. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/operating_curve.png`
    - Visual operating curve; confirm numerical claims against the CSV/JSON.
-6. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_prefill_decode/manifest.json`
+9. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_prefill_decode/manifest.json`
    - Feasible configurations and the automatic k=96/128 exclusions.
-7. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_prefill_decode/*.json`
+10. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/bmax_prefill_decode/*.json`
    - Real-prefill plus full-128-decode B/B+1 boundary evidence.
-8. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/*.json`
+11. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/runtime_at_bmax/*.json`
    - Uninstrumented 200-request measurements. These files alone are eligible
      for makespan and throughput comparison.
-9. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/*.json`
+12. `experiments/results/by_commit/05ed1c7/h100_lmsys_4k128_n200_hbm40gib/profiles_at_bmax/*.json`
    - One-wave intrusive profiles used only for H2D/exposed-stall/compute/
      attention attribution, separately for prefill and decode.
 
@@ -63,7 +74,9 @@ the winning point using, in order:
 1. physical Bmax and resulting wave count;
 2. prefill wall time and prompt tokens/s;
 3. decode wall time and generated tokens/s;
-4. Expert fetch reduction and Permanent hits in both phases;
+4. Expert fetch miss rate, absolute fetch count, and Permanent hits in both
+   phases; distinguish a lower miss rate from extra-wave effects on total
+   active Expert executions;
 5. one-wave profile totals for H2D, exposed stall, overlap, Expert compute, and
    attention;
 6. initialization cold-start and steady full-wave decode timing.
