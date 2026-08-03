@@ -84,12 +84,29 @@ def _fixed_command(
 
 
 def _write_manifest(path: Path, payload: dict, runs: list[dict]) -> None:
+    existing_runs = []
+    if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        existing_runs = list(existing.get("runs", []))
+    merged: dict[tuple, dict] = {}
+    for run in [*existing_runs, *runs]:
+        key = (
+            run.get("mode"),
+            run.get("policy"),
+            int(run.get("k", -1)),
+            int(run.get("batch_size", -1)),
+            str(run.get("output", "")),
+        )
+        merged[key] = run
+    merged_runs = list(merged.values())
     value = {
         **payload,
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
         "runs": [
-            {**run, "completed": Path(run["output"]).exists()} for run in runs
+            {**run, "completed": Path(run["output"]).exists()}
+            for run in merged_runs
         ],
+        "run_modes": sorted({str(run["mode"]) for run in merged_runs}),
     }
     atomic_write_json(path, value)
 
